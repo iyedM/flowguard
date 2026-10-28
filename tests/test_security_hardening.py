@@ -1,4 +1,4 @@
-"""Phase 4 Adversarial Security & Hardening Test Suite (16 Tests).
+"""Phase 4 Adversarial Security & Hardening Test Suite (22 Tests).
 
 Covers:
   1. Post-mutation HTTP timeout -> AMBIGUOUS_REQUIRES_RECONCILIATION -> read-before-write reconciliation
@@ -17,6 +17,12 @@ Covers:
   14. Reflected XSS neutralization via escape_html & client-side escapeHtml
   15. MCP JSON-RPC 2.0 2MB line limit and error codes (-32700, -32600, -32601, -32602)
   16. LangGraph FlowGuardMiddleware end-to-end verification and policy halt
+  17. IETF Idempotency-Key payload-hash mismatch conflict detection (HTTP 409)
+  18. UI Server POST /api/v1/idempotent-execute mandatory contract (422) & policy (403) gating
+  19. Linear-time O(N) raw_decode JSON extraction resisting pathological brace strings (No ReDoS)
+  20. Per-idempotency-key isolation in sink reconcile_read
+  21. Full semantic scope binding (workflow_id, entity_id, operation, payload_hash) on Idempotency-Key reuse
+  22. Lease-based crash recovery transitioning expired PENDING_IN_FLIGHT entries to AMBIGUOUS_REQUIRES_RECONCILIATION
 """
 
 from __future__ import annotations
@@ -743,4 +749,130 @@ def test_20_reconcile_read_isolates_distinct_idem_keys_on_same_entity() -> None:
     sink.apply_remediation("ALT-20", payload, payload, idem_key="idem-key-committed")
     assert sink.reconcile_read("ALT-20", "idem-key-committed")["committed_on_sink"] is True
     assert sink.reconcile_read("ALT-20", "idem-key-never-sent")["committed_on_sink"] is False
+
+
+# 21. Full semantic scope binding (workflow_id, entity_id, operation, payload_hash) on Idempotency-Key reuse
+def test_21_idempotency_scope_mismatch_same_payload_different_entity_or_op(tmp_path: Path) -> None:
+    from flowguard.idempotency import IdempotencyPayloadMismatchError
+
+    ledger = IdempotencyLedger(db_path=tmp_path / "idem21.sqlite")
+    sink = StatefulAIOpsClusterSink()
+    payload = {
+        "alert_id": "ALT-21",
+        "service_name": "api-gw",
+        "namespace": "prod-checkout",
+        "severity": "SEV2",
+        "action": "scale_replicas",
+        "target_replicas": 4,
+        "cooldown_seconds": 300,
+        "oncall_paged": True,
+        "justification_notes": "Scale valid",
+    }
+    r1 = ledger.execute_through_proxy(
+        workflow_id="wf-21",
+        domain=DomainName.AIOPS.value,
+        entity_id="ALT-21",
+        operation="scale_replicas",
+        payload=payload,
+        mutate_fn=lambda k: sink.apply_remediation("ALT-21", payload, payload, k),
+        reconcile_fn=sink.reconcile_read,
+        idem_key="custom-idem-key-21",
+    )
+    assert r1.applied is True
+
+    # Reusing the same idem_key with identical payload_hash on a DIFFERENT entity_id or operation must raise conflict
+    with pytest.raises(IdempotencyPayloadMismatchError, match="IDEMPOTENCY_PAYLOAD_MISMATCH"):
+        ledger.execute_through_proxy(
+            workflow_id="wf-21",
+            domain=DomainName.AIOPS.value,
+            entity_id="ALT-21-OTHER",
+            operation="scale_replicas",
+            payload=payload,
+            mutate_fn=lambda k: sink.apply_remediation("ALT-21-OTHER", payload, payload, k),
+            reconcile_fn=sink.reconcile_read,
+            idem_key="custom-idem-key-21",
+        )
+
+    with pytest.raises(IdempotencyPayloadMismatchError, match="IDEMPOTENCY_PAYLOAD_MISMATCH"):
+        ledger.execute_through_proxy(
+            workflow_id="wf-21",
+            domain=DomainName.AIOPS.value,
+            entity_id="ALT-21",
+            operation="restart_workers",
+            payload=payload,
+            mutate_fn=lambda k: sink.apply_remediation("ALT-21", payload, payload, k),
+            reconcile_fn=sink.reconcile_read,
+            idem_key="custom-idem-key-21",
+        )
+    ledger.close()
+
+
+# 22. Lease-based crash recovery transitions expired PENDING_IN_FLIGHT to AMBIGUOUS_REQUIRES_RECONCILIATION
+def test_22_crash_recovery_stale_pending_in_flight_reconciles_never_blindly_retries(
+    tmp_path: Path,
+) -> None:
+    import time
+
+    ledger = IdempotencyLedger(
+        db_path=tmp_path / "idem22.sqlite",
+        in_flight_lease_seconds=0.05,
+    )
+    sink = StatefulAIOpsClusterSink()
+    entity_id = "ALT-22"
+    payload = {
+        "alert_id": entity_id,
+        "service_name": "api-gw",
+        "namespace": "prod-stateless",
+        "severity": "SEV1",
+        "action": "scale_replicas",
+        "target_replicas": 6,
+        "cooldown_seconds": 300,
+        "oncall_paged": True,
+        "justification_notes": "Crash recovery test",
+    }
+    idem_key = ledger.derive_key("wf-crash", entity_id, "scale_replicas", payload)
+    p_hash = ledger.hash_payload(payload)
+
+    # Simulate a worker that wrote PENDING_IN_FLIGHT, mutated the sink, and crashed before updating SQLite
+    stale_ts = time.time() - 5.0
+    sink.apply_remediation(entity_id, payload, payload, idem_key=idem_key)
+    assert sink.count_mutations_for_entity(entity_id) == 1
+
+    with ledger._lock:
+        ledger._conn.execute(
+            """
+            INSERT INTO idempotency_ledger (
+                idem_key, workflow_id, entity_id, operation, payload_hash,
+                state, attempt_count, sink_receipt_json, reconciled, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, NULL, 0, ?, ?)
+            """,
+            (
+                idem_key,
+                "wf-crash",
+                entity_id,
+                "scale_replicas",
+                p_hash,
+                IdempotencyState.PENDING_IN_FLIGHT.value,
+                stale_ts,
+                stale_ts,
+            ),
+        )
+
+    # Next retry after lease expiry transitions PENDING_IN_FLIGHT -> AMBIGUOUS_REQUIRES_RECONCILIATION -> COMMITTED via reconcile_read
+    receipt = ledger.execute_through_proxy(
+        workflow_id="wf-crash",
+        domain=DomainName.AIOPS.value,
+        entity_id=entity_id,
+        operation="scale_replicas",
+        payload=payload,
+        mutate_fn=lambda k: sink.apply_remediation(entity_id, payload, payload, k),
+        reconcile_fn=sink.reconcile_read,
+        idem_key=idem_key,
+    )
+    assert receipt.reconciled_after_timeout is True
+    assert receipt.applied is False
+    assert receipt.idempotency_state == IdempotencyState.COMMITTED
+    assert sink.count_mutations_for_entity(entity_id) == 1
+    ledger.close()
+
 

@@ -46,9 +46,11 @@ class IdempotencyLedger:
         self,
         db_path: Optional[Path] = None,
         telemetry: Optional[TelemetryRecorder] = None,
+        in_flight_lease_seconds: float = 30.0,
     ) -> None:
         self.db_path = str(db_path) if db_path is not None else ":memory:"
         self.telemetry = telemetry
+        self.in_flight_lease_seconds = float(in_flight_lease_seconds)
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(
             self.db_path,
@@ -58,6 +60,30 @@ class IdempotencyLedger:
         )
         self._conn.row_factory = sqlite3.Row
         self._init_db()
+
+    def recover_abandoned_in_flight(self, now: Optional[float] = None) -> int:
+        """Transition expired PENDING_IN_FLIGHT leases to AMBIGUOUS_REQUIRES_RECONCILIATION.
+
+        Never transitions directly to FAILED_SAFE_TO_RETRY because a worker may have
+        crashed after the downstream sink mutated state.
+        """
+        current_time = now if now is not None else time.time()
+        cutoff = current_time - self.in_flight_lease_seconds
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE idempotency_ledger
+                SET state = ?, updated_at = ?
+                WHERE state = ? AND updated_at <= ?
+                """,
+                (
+                    IdempotencyState.AMBIGUOUS_REQUIRES_RECONCILIATION.value,
+                    current_time,
+                    IdempotencyState.PENDING_IN_FLIGHT.value,
+                    cutoff,
+                ),
+            )
+            return int(cursor.rowcount)
 
     def _init_db(self) -> None:
         with self._lock:
@@ -204,11 +230,16 @@ class IdempotencyLedger:
         with self._lock:
             existing = self.get_record(idem_key)
 
-            if existing is not None and existing.payload_hash != payload_hash:
+            if existing is not None and (
+                existing.payload_hash != payload_hash
+                or existing.workflow_id != workflow_id
+                or existing.entity_id != entity_id
+                or existing.operation != operation
+            ):
                 raise IdempotencyPayloadMismatchError(
                     f"IDEMPOTENCY_PAYLOAD_MISMATCH: Idempotency key '{idem_key}' was already registered "
-                    f"with payload_hash '{existing.payload_hash}', which conflicts with incoming "
-                    f"payload_hash '{payload_hash}'."
+                    f"for scope ({existing.workflow_id}, {existing.entity_id}, {existing.operation}, hash={existing.payload_hash}), "
+                    f"which conflicts with incoming scope ({workflow_id}, {entity_id}, {operation}, hash={payload_hash})."
                 )
 
             # Case 1: Already COMMITTED -> Replay cached receipt without mutating sink
@@ -229,24 +260,32 @@ class IdempotencyLedger:
                     ground_truth_snapshot=cached.get("ground_truth_snapshot", {}),
                 )
 
-            # Case 2: Currently PENDING_IN_FLIGHT -> Block concurrent duplicate execution
+            # Case 2: Currently PENDING_IN_FLIGHT -> Check if lease is still active or expired after worker crash
             if existing is not None and existing.state == IdempotencyState.PENDING_IN_FLIGHT:
+                if (now - existing.updated_at) < self.in_flight_lease_seconds:
+                    self._conn.execute(
+                        "UPDATE idempotency_ledger SET attempt_count = attempt_count + 1 WHERE idem_key = ?",
+                        (idem_key,),
+                    )
+                    return SinkMutationReceipt(
+                        idem_key=idem_key,
+                        entity_id=entity_id,
+                        operation=operation,
+                        applied=False,
+                        idempotency_state=IdempotencyState.PENDING_IN_FLIGHT,
+                        concurrent_duplicate_blocked=True,
+                        mutation_count_for_entity=0,
+                        ground_truth_snapshot={},
+                    )
+                # Lease expired (abandoned in-flight entry after worker crash):
+                # Transition to AMBIGUOUS_REQUIRES_RECONCILIATION so we never blindly re-execute without read reconciliation.
                 self._conn.execute(
-                    "UPDATE idempotency_ledger SET attempt_count = attempt_count + 1, updated_at = ? WHERE idem_key = ?",
-                    (now, idem_key),
+                    "UPDATE idempotency_ledger SET state = ?, updated_at = ? WHERE idem_key = ?",
+                    (IdempotencyState.AMBIGUOUS_REQUIRES_RECONCILIATION.value, now, idem_key),
                 )
-                return SinkMutationReceipt(
-                    idem_key=idem_key,
-                    entity_id=entity_id,
-                    operation=operation,
-                    applied=False,
-                    idempotency_state=IdempotencyState.PENDING_IN_FLIGHT,
-                    concurrent_duplicate_blocked=True,
-                    mutation_count_for_entity=0,
-                    ground_truth_snapshot={},
-                )
+                existing.state = IdempotencyState.AMBIGUOUS_REQUIRES_RECONCILIATION
 
-            # Case 3: AMBIGUOUS_REQUIRES_RECONCILIATION (prior post-commit HTTP timeout)
+            # Case 3: AMBIGUOUS_REQUIRES_RECONCILIATION (prior post-commit HTTP timeout or expired in-flight lease)
             if (
                 existing is not None
                 and existing.state == IdempotencyState.AMBIGUOUS_REQUIRES_RECONCILIATION

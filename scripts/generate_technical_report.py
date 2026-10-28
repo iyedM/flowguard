@@ -173,7 +173,7 @@ def generate_pdf_report(
 
 **Author:** Iyed Mohamed — Final-Year Computer Engineering Student (Master 2 Equivalent, CTI / EUR-ACE Accredited), ESPRIT School of Engineering, Tunis, Tunisia  
 **ORCID:** [`0009-0008-9493-7510`](https://orcid.org/0009-0008-9493-7510) | **GitHub Repository:** [`https://github.com/iyedM/flowguard`](https://github.com/iyedM/flowguard) | **Companion Research:** *CEGAR-Harness* ([`DOI: 10.5281/zenodo.23731911`](https://doi.org/10.5281/zenodo.23731911))  
-**Date:** October 28, 2026 | **Version:** `v0.2.0` (46/46 Automated Verification & Security Hardening Tests Passing)
+**Date:** October 28, 2026 | **Version:** `v0.2.1` (48/48 Automated Verification & Security Hardening Tests Passing)
 
 ---
 
@@ -181,9 +181,9 @@ def generate_pdf_report(
 
 Low-code and code-first workflow engines such as **n8n**, **LangGraph**, and **Model Context Protocol (MCP)** tool servers increasingly embed Large Language Models (LLMs) inside operational automation loops across **AIOps incident remediation**, **DevSecOps vulnerability/secret triage**, and **Cloud/GPU FinOps quota provisioning**. While traditional workflow orchestrators ensure graph-level message routing, they lack formal runtime verification at the boundary where stochastic LLM reasoning triggers external state-mutating APIs. Consequently, operational agentic workflows suffer from four compound failure modes: (1) *schema drift and markdown-wrapped JSON truncation*, (2) *silent cross-field semantic invariant violations*, (3) *duplicate state mutations caused by blind retries after post-commit HTTP timeouts*, and (4) *indirect prompt-injection attacks embedded in untrusted logs, pull requests, or tickets*.
 
-We present **FlowGuard**, a neuro-symbolic verification, bounded recovery, and transactional idempotency middleware for agentic workflows. FlowGuard interposes four mechanisms between untrusted LLM outputs and downstream side-effect sinks: **(A) Deterministic Contract & Cross-Field Invariant Validation** (JSON Schema Draft 2020-12 paired with domain-specific semantic invariants emitting a 3-state verdict: `VALID`, `RECOVERABLE_VIOLATION`, or `UNSAFE_POLICY_BLOCK`); **(B) Bounded Two-Tier Recovery** combining a 0-token Tier-1 symbolic schema-drift normalizer with a bounded Tier-2 predicate-guided repair loop (`max_repair_turns = 2`) and linear-time $O(N)$ `JSONDecoder.raw_decode` extraction; **(C) A 4-State SQLite WAL Transactional Idempotency Machine** (`PENDING_IN_FLIGHT`, `COMMITTED`, `FAILED_SAFE_TO_RETRY`, and `AMBIGUOUS_REQUIRES_RECONCILIATION`) with read-before-write reconciliation and IETF `Idempotency-Key` payload-hash conflict detection; and **(D) Strict Separation of the Deterministic Security Policy Boundary from Fallible Untrusted Taint Signals** (`is_authoritative_boundary = False`).
+We present **FlowGuard**, a neuro-symbolic verification, bounded recovery, and transactional idempotency middleware for agentic workflows. FlowGuard interposes four mechanisms between untrusted LLM outputs and downstream side-effect sinks: **(A) Deterministic Contract & Cross-Field Invariant Validation** (JSON Schema Draft 2020-12 paired with domain-specific semantic invariants emitting a 3-state verdict: `VALID`, `RECOVERABLE_VIOLATION`, or `UNSAFE_POLICY_BLOCK`); **(B) Bounded Two-Tier Recovery** combining a 0-token Tier-1 symbolic schema-drift normalizer with a bounded Tier-2 predicate-guided repair loop (`max_repair_turns = 2`) and linear-time $O(N)$ `JSONDecoder.raw_decode` extraction; **(C) A 4-State SQLite WAL Transactional Idempotency Machine** (`PENDING_IN_FLIGHT`, `COMMITTED`, `FAILED_SAFE_TO_RETRY`, and `AMBIGUOUS_REQUIRES_RECONCILIATION`) with read-before-write reconciliation, lease-based crash recovery (`in_flight_lease_seconds`), and full semantic scope `(workflow_id, entity_id, operation, payload_hash)` conflict detection; and **(D) Strict Separation of the Deterministic Security Policy Boundary from Fallible Untrusted Taint Signals** (`is_authoritative_boundary = False`).
 
-Across a **720-run controlled multi-domain benchmark** (180 scenarios $\\times$ 4 strategies), FlowGuard lifts the State-Verified Success Rate (SVSR) from **18.89%** [95% Wilson CI: 13.84%, 25.23%] (native n8n) and **27.22%** [21.25%, 34.15%] (naive retry) to **91.67%** [86.71%, 94.89%], while reducing the Unsafe Side-Effect Rate from **67.78%** to **0.00%**. A **900-run 5-way ablation study** isolates the exact contribution of each mechanism. Finally, in **30 live local GPU runs** using `llama3:latest` (8B Q4_0 via Ollama on an NVIDIA RTX 2050), FlowGuard achieves **93.33% SVSR** [70.18%, 98.81%] (14/15 scenarios, cleanly escalating 1 unrecoverable schema drift) and **0.00% unsafe side-effects** compared to **20.00% SVSR** and **73.33% unsafe side-effects** under naive retry.
+Across a **720-run controlled multi-domain benchmark** (180 scenarios $\\times$ 4 strategies), FlowGuard lifts the State-Verified Success Rate (SVSR) from **18.89%** [95% Wilson CI: 13.84%, 25.23%] (native n8n pass-through baseline) and **27.22%** [21.25%, 34.15%] (naive retry) to **91.67%** [86.71%, 94.89%], while reducing the Unsafe Side-Effect Rate from **67.78%** to **0.00%**. A **900-run 5-way ablation study** isolates the exact contribution of each mechanism. Finally, in **30 live local GPU runs** using `llama3:latest` (8B Q4_0 via Ollama on an NVIDIA RTX 2050), FlowGuard achieves **93.33% SVSR** [70.18%, 98.81%] (14/15 scenarios, cleanly escalating 1 unrecoverable schema drift) and **0.00% unsafe side-effects** compared to **20.00% SVSR** and **73.33% unsafe side-effects** under naive retry.
 
 ---
 
@@ -227,11 +227,11 @@ When Mechanism A returns `RECOVERABLE_VIOLATION`, Mechanism B executes a strictl
 - **Tier 2 (Bounded Predicate-Guided Repair Loop, `max_repair_turns = 2`):** Extracts JSON from markdown fences or prose using a linear-time $O(N)$ `json.JSONDecoder().raw_decode` scanner (`MAX_RAW_EXTRACT_CHARS = 65536`, eliminating quadratic regex backtracking / ReDoS) and feeds exact violated predicate identifiers back to the repair callback for at most 2 turns. Every candidate is re-validated through Mechanism A. If violations persist after Turn 2, FlowGuard halts cleanly in `SAFE_ESCALATION_HALT`.
 
 ### 2.3 Mechanism C: 4-State SQLite WAL Transactional Idempotency Proxy (`flowguard/idempotency.py`)
-Standard 2-state idempotency caches (`NEW` vs. `DONE`) fail when an HTTP timeout occurs *after* the downstream service has already mutated state (`PostCommitTimeoutError`). FlowGuard implements a thread-safe SQLite WAL state machine (`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`) with four states:
-1. `PENDING_IN_FLIGHT`: Acquired atomically before invoking the downstream sink; blocks concurrent duplicate webhook deliveries.
-2. `COMMITTED`: Recorded alongside the canonical `payload_hash` and `sink_receipt_json`; subsequent retries with the same `idem_key` and `payload_hash` replay the cached receipt without re-mutating the sink. If a caller reuses an existing `idem_key` with a *different* `payload_hash`, FlowGuard raises `IdempotencyPayloadMismatchError` (HTTP `409 Conflict`, enforcing the IETF `Idempotency-Key` draft specification).
+Standard 2-state idempotency caches (`NEW` vs. `DONE`) fail when an HTTP timeout occurs *after* the downstream service has already mutated state (`PostCommitTimeoutError`) or when a worker crashes mid-flight. FlowGuard implements a thread-safe SQLite WAL state machine (`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`) with four states:
+1. `PENDING_IN_FLIGHT`: Acquired atomically before invoking the downstream sink; blocks concurrent duplicate webhook deliveries while the lease (`in_flight_lease_seconds`) is active. If a worker crashes and the lease expires, FlowGuard transitions the record to `AMBIGUOUS_REQUIRES_RECONCILIATION` (never blindly to `FAILED_SAFE_TO_RETRY`).
+2. `COMMITTED`: Recorded alongside the full semantic scope `(workflow_id, entity_id, operation, payload_hash)` and `sink_receipt_json`; subsequent retries with the same scope replay the cached receipt without re-mutating the sink. If a caller reuses an existing `idem_key` with a different `payload_hash`, `entity_id`, `operation`, or `workflow_id`, FlowGuard raises `IdempotencyPayloadMismatchError` (HTTP `409 Conflict`, enforcing the IETF `Idempotency-Key` specification).
 3. `FAILED_SAFE_TO_RETRY`: Recorded when the sink raises a pre-commit transient error (e.g., HTTP 429/503 before state mutation); safe to re-execute on retry.
-4. `AMBIGUOUS_REQUIRES_RECONCILIATION`: Recorded when the sink call times out after request transmission (`PostCommitTimeoutError`). On retry, FlowGuard **forbids blind re-execution** and instead queries the sink's read-only reconciliation endpoint (`reconcile_read(entity_id, idem_key)`). If the sink confirms the mutation was already applied, FlowGuard transitions `AMBIGUOUS_REQUIRES_RECONCILIATION -> COMMITTED` without re-mutating; if the sink lacks a read endpoint, FlowGuard halts in `AMBIGUOUS_REQUIRES_RECONCILIATION` for operator inspection.
+4. `AMBIGUOUS_REQUIRES_RECONCILIATION`: Recorded when the sink call times out after request transmission (`PostCommitTimeoutError`) or when an in-flight lease expires after a crash. On retry, FlowGuard **forbids blind re-execution** and instead queries the sink's read-only reconciliation endpoint (`reconcile_read(entity_id, idem_key)`). If the sink confirms the mutation was already applied, FlowGuard transitions `AMBIGUOUS_REQUIRES_RECONCILIATION -> COMMITTED` without re-mutating; if the sink lacks a read endpoint, FlowGuard halts in `AMBIGUOUS_REQUIRES_RECONCILIATION` for operator inspection.
 
 ### 2.4 Mechanism D: Separation of Deterministic Policy Boundary vs. Fallible Taint Signal (`flowguard/policy_guard.py`)
 A common design flaw in LLM guardrails is using regex or classifier-based prompt-injection detection on untrusted text (`recent_log_snippet`, `untrusted_pr_body`) as the primary security gate. Adversaries easily evade keyword filters using polite, domain-plausible paraphrases. In FlowGuard:
@@ -243,7 +243,7 @@ A common design flaw in LLM guardrails is using regex or classifier-based prompt
 ## 3. Experiment A: Multi-Domain Controlled Benchmark (720 Executions)
 
 We evaluate **180 controlled scenarios** (60 per domain across AIOps, DevSecOps, and Cloud FinOps) spanning **6 fault classes** (`F0_NOMINAL`, `F1_FORMAT_DRIFT`, `F2_SEMANTIC_VIOLATION`, `F3_TRANSIENT_PRE_COMMIT`, `F4_POST_COMMIT_TIMEOUT`, `F5_ADVERSARIAL_INPUT`) under **4 strategies** ($180 \\times 4 = 720$ runs):
-- `B1_NATIVE_N8N`: Native workflow execution without contract checks, repair, or idempotency ledger.
+- `B1_NATIVE_N8N`: Controlled Python baseline emulating default unguarded `n8n` pass-through execution (direct node-to-sink forwarding without contract checks, repair, or idempotency ledger), while `workflows/*.json` (`exportable_n8n_workflow_json`) provide the importable `n8n` workflow templates.
 - `B2_NAIVE_RETRY`: Unstructured retry loop (up to 2 retries on error/timeout) without contract predicates or post-commit reconciliation.
 - `B3_CONTRACT_ONLY`: Deterministic JSON Schema + cross-field invariant gate (Mechanism A + D) that rejects invalid outputs immediately without Tier-1/Tier-2 recovery or 4-state timeout reconciliation.
 - `FLOWGUARD_FULL`: Complete FlowGuard pipeline (Mechanisms A + B + C + D).
@@ -286,17 +286,18 @@ To evaluate FlowGuard under genuine stochastic LLM generation, Experiment B runs
 
 ---
 
-## 6. Security Hardening & Adversarial Audit Matrix (46 Automated `pytest` Tests)
+## 6. Security Hardening & Adversarial Audit Matrix (48 Automated `pytest` Tests)
 
-FlowGuard includes a 20-test adversarial security hardening suite (`tests/test_security_hardening.py`, part of the 46-test `pytest` suite):
-1. **Post-Commit Timeout Reconciliation (`test_01`, `test_02`, `test_20`):** Verifies `AMBIGUOUS_REQUIRES_RECONCILIATION -> COMMITTED` via `reconcile_read`, safe halt when `reconcile_read` is unavailable, and strict per-key isolation across distinct `idem_key` values on the same entity.
-2. **Thread-Safe SQLite WAL Concurrency (`test_03`):** 10 concurrent threads firing identical webhook deliveries; exactly 1 sink mutation occurs (`mutation_count == 1`).
-3. **Subtle Prompt Injection Bypassing Taint Regex (`test_04`, `test_05`, `test_06`):** Verifies that polite, keyword-free adversarial notes (`TaintSignal.detected == False`) attempting unauthorized `prod-stateful-db` rollbacks, `CVSS 9.8` merges, or FinOps budget breaches are 100% blocked by `PolicyGuard`.
-4. **Constant-Time Token Verification & Anti-Spoofing (`test_07`, `test_08`):** Rejects forged approval tokens using `hmac.compare_digest` and blocks LLM namespace spoofing.
-5. **Anti-SSRF URL Validation (`test_09`):** Blocks `file://`, `ftp://`, `gopher://`, cloud metadata IPs (`169.254.169.254`, `metadata.google.internal`), and non-allowlisted hosts.
-6. **CWE-22 Path Traversal Prevention (`test_10`):** Enforces `Path.resolve().is_relative_to(base_dir)` against `../`, URL-encoded `%2e%2e%2f`, backslash, and null-byte payloads.
-7. **HTTP Sidecar Hardening & Mandatory Pre-Execution Gating (`test_11`–`test_14`, `test_18`):** Enforces `CSP`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, 1 MB body cap (`HTTP 413`), HTML escaping, and mandatory `ContractValidator` (`HTTP 422`) + `PolicyGuard` (`HTTP 403`) + `IdempotencyPayloadMismatchError` (`HTTP 409`) checks on `POST /api/v1/idempotent-execute`.
-8. **MCP JSON-RPC 2.0 Fuzzing & 2 MB Cap (`test_15`)** and **Linear-Time $O(N)$ `raw_decode` Extraction (`test_19`)** preventing quadratic regex backtracking (ReDoS).
+FlowGuard includes a 22-test adversarial security and crash-consistency suite (`tests/test_security_hardening.py`, part of the 48-test `pytest` suite):
+1. **Post-Commit Timeout Reconciliation & Lease-Based Crash Recovery (`test_01`, `test_02`, `test_20`, `test_22`):** Verifies `AMBIGUOUS_REQUIRES_RECONCILIATION -> COMMITTED` via `reconcile_read`, safe halt when `reconcile_read` is unavailable, strict per-key isolation across distinct `idem_key` values on the same entity, and lease-based crash recovery transitioning expired `PENDING_IN_FLIGHT` entries to `AMBIGUOUS_REQUIRES_RECONCILIATION`.
+2. **Full Semantic Scope Binding on Idempotency-Key Reuse (`test_17`, `test_21`):** Verifies that reusing an existing `idem_key` with a different `payload_hash`, `entity_id`, `operation`, or `workflow_id` raises `IdempotencyPayloadMismatchError` (`HTTP 409 Conflict`).
+3. **Thread-Safe SQLite WAL Concurrency (`test_03`):** 12 concurrent threads firing identical webhook deliveries; exactly 1 sink mutation occurs (`mutation_count == 1`).
+4. **Subtle Prompt Injection Bypassing Taint Regex (`test_04`, `test_05`, `test_06`):** Verifies that polite, keyword-free adversarial notes (`TaintSignal.detected == False`) attempting unauthorized `prod-stateful-db` rollbacks, `CVSS 9.8` merges, or FinOps budget breaches are 100% blocked by `PolicyGuard`.
+5. **Constant-Time Token Verification & Anti-Spoofing (`test_07`, `test_08`):** Rejects forged approval tokens using `hmac.compare_digest` and blocks LLM namespace spoofing.
+6. **Anti-SSRF URL Validation (`test_09`):** Blocks `file://`, `ftp://`, `gopher://`, cloud metadata IPs (`169.254.169.254`, `metadata.google.internal`), and non-allowlisted hosts.
+7. **CWE-22 Path Traversal Prevention (`test_10`):** Enforces `Path.resolve().is_relative_to(base_dir)` against `../`, URL-encoded `%2e%2e%2f`, backslash, and null-byte payloads.
+8. **HTTP Sidecar Hardening & Mandatory Pre-Execution Gating (`test_11`–`test_14`, `test_18`):** Enforces `CSP`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, 1 MB body cap (`HTTP 413`), HTML escaping, and mandatory `ContractValidator` (`HTTP 422`) + `PolicyGuard` (`HTTP 403`) + `IdempotencyPayloadMismatchError` (`HTTP 409`) checks on `POST /api/v1/idempotent-execute`.
+9. **MCP JSON-RPC 2.0 Fuzzing & 2 MB Cap (`test_15`)** and **Linear-Time $O(N)$ `raw_decode` Extraction (`test_19`)** preventing quadratic regex backtracking (ReDoS).
 
 ---
 
@@ -501,12 +502,12 @@ FlowGuard includes a 20-test adversarial security hardening suite (`tests/test_s
       <tr>
         <td><code>PENDING_IN_FLIGHT</code></td>
         <td>Acquired atomically prior to invoking downstream sink</td>
-        <td>Blocks concurrent duplicate webhook deliveries (<code>concurrent_duplicate_blocked = True</code>); verifies payload hash consistency.</td>
+        <td>Blocks concurrent duplicate webhook deliveries while lease (<code>in_flight_lease_seconds</code>) is active; transitions expired leases to <code>AMBIGUOUS_REQUIRES_RECONCILIATION</code>.</td>
       </tr>
       <tr>
         <td><code>COMMITTED</code></td>
         <td>Sink mutation succeeded or post-timeout reconciliation confirmed commit</td>
-        <td>Replays cached <code>sink_receipt_json</code> with 0 downstream mutations (<code>replayed_from_ledger = True</code>); raises <code>IdempotencyPayloadMismatchError</code> (HTTP 409) if reused with a mutated payload hash.</td>
+        <td>Replays cached <code>sink_receipt_json</code> with 0 downstream mutations (<code>replayed_from_ledger = True</code>); raises <code>IdempotencyPayloadMismatchError</code> (HTTP 409) if reused with a different <code>(workflow_id, entity_id, operation, payload_hash)</code> scope.</td>
       </tr>
       <tr>
         <td><code>FAILED_SAFE_TO_RETRY</code></td>
@@ -515,7 +516,7 @@ FlowGuard includes a 20-test adversarial security hardening suite (`tests/test_s
       </tr>
       <tr>
         <td><code>AMBIGUOUS_REQUIRES_RECONCILIATION</code></td>
-        <td>Sink raised <code>PostCommitTimeoutError</code> (HTTP timeout in transit)</td>
+        <td>Sink raised <code>PostCommitTimeoutError</code> or in-flight lease expired after crash</td>
         <td>Forbids blind re-execution; queries <code>reconcile_read(entity_id, idem_key)</code>. If committed on sink, transitions to <code>COMMITTED</code> without re-mutating; if read endpoint unavailable, halts safely.</td>
       </tr>
     </tbody>
@@ -526,7 +527,7 @@ FlowGuard includes a 20-test adversarial security hardening suite (`tests/test_s
 
   <div class="page-break"></div>
   <h2>3. Experiment A: Multi-Domain Controlled Benchmark (720 Executions)</h2>
-  <p>We evaluate <strong>180 scenarios</strong> (60 per domain) across 6 fault classes (<code>F0_NOMINAL</code>: 10/domain, <code>F1_FORMAT_DRIFT</code>: 10/domain, <code>F2_SEMANTIC_VIOLATION</code>: 10/domain, <code>F3_TRANSIENT_PRE_COMMIT</code>: 10/domain, <code>F4_POST_COMMIT_TIMEOUT</code>: 10/domain, <code>F5_ADVERSARIAL_INPUT</code>: 10/domain) and 4 strategies (720 total executions). All proportions are reported with exact 95% Wilson score confidence intervals.</p>
+  <p>We evaluate <strong>180 scenarios</strong> (60 per domain) across 6 fault classes (<code>F0_NOMINAL</code>: 10/domain, <code>F1_FORMAT_DRIFT</code>: 10/domain, <code>F2_SEMANTIC_VIOLATION</code>: 10/domain, <code>F3_TRANSIENT_PRE_COMMIT</code>: 10/domain, <code>F4_POST_COMMIT_TIMEOUT</code>: 10/domain, <code>F5_ADVERSARIAL_INPUT</code>: 10/domain) and 4 strategies (720 total executions), where <code>B1_NATIVE_N8N</code> is a controlled Python baseline emulating default unguarded <code>n8n</code> pass-through execution without FlowGuard middleware. All proportions are reported with exact 95% Wilson score confidence intervals.</p>
 
   <table>
     <thead>
@@ -625,11 +626,11 @@ FlowGuard includes a 20-test adversarial security hardening suite (`tests/test_s
     </tbody>
   </table>
 
-  <h2>6. Security Hardening &amp; Adversarial Verification Suite (46 Automated Tests)</h2>
-  <p>FlowGuard is validated by <strong>46 automated <code>pytest</code> tests</strong> (including 20 dedicated adversarial security and concurrency tests in <code>tests/test_security_hardening.py</code>):</p>
+  <h2>6. Security Hardening &amp; Adversarial Verification Suite (48 Automated Tests)</h2>
+  <p>FlowGuard is validated by <strong>48 automated <code>pytest</code> tests</strong> (including 22 dedicated adversarial security and crash-consistency tests in <code>tests/test_security_hardening.py</code>):</p>
   <ul>
-    <li><strong>IETF Idempotency-Key Conflict &amp; Post-Commit Timeout Reconciliation (<code>test_01</code>, <code>test_02</code>, <code>test_17</code>, <code>test_20</code>):</strong> Verifies that post-commit HTTP timeouts transition to <code>AMBIGUOUS_REQUIRES_RECONCILIATION</code>, reconcile via <code>reconcile_read</code> with 0 duplicate mutations, isolate distinct keys on the same entity, and raise <code>IdempotencyPayloadMismatchError</code> (HTTP 409) if an idempotency key is reused with a tampered payload hash.</li>
-    <li><strong>Multithreaded SQLite WAL Locking (<code>test_03</code>):</strong> 10 concurrent threads firing identical webhook deliveries; SQLite WAL + <code>RLock</code> guarantees <code>mutation_count == 1</code>.</li>
+    <li><strong>IETF Idempotency-Key Scope Binding, Lease Crash Recovery &amp; Post-Commit Reconciliation (<code>test_01</code>, <code>test_02</code>, <code>test_17</code>, <code>test_20</code>, <code>test_21</code>, <code>test_22</code>):</strong> Verifies that post-commit HTTP timeouts and expired <code>PENDING_IN_FLIGHT</code> crash leases transition to <code>AMBIGUOUS_REQUIRES_RECONCILIATION</code>, reconcile via <code>reconcile_read</code> with 0 duplicate mutations, isolate distinct keys on the same entity, and raise <code>IdempotencyPayloadMismatchError</code> (HTTP 409) if an idempotency key is reused across a different <code>(workflow_id, entity_id, operation, payload_hash)</code> scope.</li>
+    <li><strong>Multithreaded SQLite WAL Locking (<code>test_03</code>):</strong> 12 concurrent threads firing identical webhook deliveries; SQLite WAL + <code>RLock</code> guarantees <code>mutation_count == 1</code>.</li>
     <li><strong>Subtle Prompt Injection Bypassing Taint Regex (<code>test_04</code>–<code>test_08</code>):</strong> Verifies that keyword-free adversarial injections (where <code>TaintSignal.detected == False</code>) and forged approval tokens are 100% blocked by <code>PolicyGuard</code> using constant-time <code>hmac.compare_digest</code>.</li>
     <li><strong>Anti-SSRF, CWE-22 Path Traversal, Linear-Time $O(N)$ JSON Extraction &amp; Sidecar Gateways (<code>test_09</code>–<code>test_19</code>):</strong> Blocks <code>file://</code>, <code>ftp://</code>, <code>gopher://</code>, and cloud metadata IPs (<code>169.254.169.254</code>); enforces <code>Path.resolve().is_relative_to()</code>; prevents ReDoS via $O(N)$ <code>JSONDecoder.raw_decode</code>; and gates <code>POST /api/v1/idempotent-execute</code> behind mandatory <code>ContractValidator</code> (HTTP 422) and <code>PolicyGuard</code> (HTTP 403) checks.</li>
   </ul>

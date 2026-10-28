@@ -28,7 +28,8 @@ Every component and experimental result artifact in this repository carries an e
    - **Tier 2 (Bounded Repair Loop, `max_repair_turns = 2`):** Feeds exact violated predicates back to the repair step and re-validates every candidate through Mechanism A. Transitions to `SAFE_ESCALATION_HALT` when repair budget is exhausted.
 3. **Mechanism C — 4-State Transactional Idempotency & Side-Effect Proxy (`flowguard/idempotency.py`):**
    - Thread-safe SQLite `WAL` ledger (`busy_timeout=5000`, `threading.RLock()`) implementing the 4-state lifecycle: `PENDING_IN_FLIGHT`, `COMMITTED`, `FAILED_SAFE_TO_RETRY`, and `AMBIGUOUS_REQUIRES_RECONCILIATION`.
-   - On a **post-commit HTTP timeout** (where the sink applied the side effect, but the HTTP response timed out in transit), transitions to `AMBIGUOUS_REQUIRES_RECONCILIATION` and queries the sink's reconciliation read endpoint before retrying, preventing duplicate destructive side effects.
+   - Enforces full semantic scope binding (`(workflow_id, entity_id, operation, payload_hash)`) on `Idempotency-Key` reuse (`HTTP 409 Conflict` on mismatch) and lease-based crash recovery (`in_flight_lease_seconds`): if a worker crashes while an entry is `PENDING_IN_FLIGHT`, lease expiration transitions the entry to `AMBIGUOUS_REQUIRES_RECONCILIATION` (never blindly to `FAILED_SAFE_TO_RETRY`).
+   - On a **post-commit HTTP timeout** or expired in-flight lease, queries the sink's reconciliation read endpoint (`reconcile_read`) before retrying, preventing duplicate destructive side effects.
 4. **Mechanism D — Least-Privilege Policy Engine & Untrusted Taint Auditor (`flowguard/policy_guard.py`):**
    - **Strict Separation of Security Boundary vs. Fallible Taint Signal:** Authoritative security invariants (`namespace == "prod-stateful-db"`, `cvss_score >= 7.0`, `secret_detected == True`, `team_monthly_budget_cap_usd`) are enforced deterministically on authoritative context attributes. Heuristic prompt-injection detection on untrusted text (`recent_log_snippet`, `untrusted_pr_title_and_body`, `justification_notes`) is recorded strictly as an observability signal (`is_authoritative_boundary = False`).
 
@@ -37,6 +38,8 @@ Every component and experimental result artifact in this repository carries an e
 ## 3. Experimental Results
 
 ### 3.1 Experiment A: Controlled Multi-Domain Benchmark (720 Executions, 95% Wilson CIs)
+
+> **Baseline Note:** In Experiment A (`deterministic_harness` + `stateful_simulated_sink`), `B1_NATIVE_N8N` is a controlled Python baseline emulating default unguarded `n8n` pass-through execution (direct node-to-sink forwarding without contract validation, schema repair, or idempotency middleware), whereas `workflows/*.json` (`exportable_n8n_workflow_json`) provide the importable `n8n` workflow definitions wired to FlowGuard's HTTP sidecar.
 
 ![Figure 1: Strategy Comparison Across Domains](docs/figures/fig1_strategy_comparison_by_domain.svg)
 
@@ -89,7 +92,7 @@ Every component and experimental result artifact in this repository carries an e
 ## 5. Quickstart & Reproducibility
 
 ```bash
-# 1. Run the full 46-test pytest suite (Phases 1–4 + 20 adversarial security & concurrency tests)
+# 1. Run the full 48-test pytest suite (Phases 1–4 + 22 adversarial security & crash-consistency tests)
 .venv/bin/pytest -v
 
 # 2. Reproduce Experiment A (720 benchmark runs + 900 ablation runs)

@@ -1,0 +1,171 @@
+{
+  "name": "FlowGuard Domain 3 - Cloud & GPU FinOps Quota Provisioning",
+  "active": false,
+  "versionId": "flowguard-cloud-finops-v1",
+  "meta": {
+    "execution_mode_label": "exportable_n8n_workflow_json",
+    "domain": "cloud_finops_provisioning",
+    "author": "Iyed Mohamed (ORCID: 0009-0008-9493-7510)",
+    "flowguard_contract_version": "0.1.0"
+  },
+  "nodes": [
+    {
+      "id": "node-webhook-gitops",
+      "name": "GitOps Infrastructure Quota Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "finops/quota-request",
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "id": "node-context-taint-audit",
+      "name": "FlowGuard Authoritative FinOps Ledger Context & Taint Auditor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const body = $input.item.json;\nreturn {\n  json: {\n    authoritative_context: {\n      request_id: body.request_id,\n      team_name: body.team_name,\n      environment: body.environment,\n      requested_vcpu: body.requested_vcpu,\n      requested_gpu_count: body.requested_gpu_count,\n      hourly_unit_cost_usd: body.hourly_unit_cost_usd,\n      team_monthly_budget_cap_usd: body.team_monthly_budget_cap_usd\n    },\n    justification_notes: body.justification_notes || ''\n  }\n};"
+      }
+    },
+    {
+      "id": "node-ollama-agent",
+      "name": "Ollama Local LLM FinOps Provisioning Agent (llama3:latest)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3:latest', stream: false, format: 'json', options: { temperature: 0.0 }, prompt: 'Produce JSON matching CloudFinOpsQuotaProvisioningContract for request ' + $json.authoritative_context.request_id }) }}"
+      }
+    },
+    {
+      "id": "node-flowguard-verify-recover",
+      "name": "FlowGuard Contract Validator & Two-Tier Recovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8090/api/v1/verify-and-recover",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ domain: 'cloud_finops_provisioning', context: $node['FlowGuard Authoritative FinOps Ledger Context & Taint Auditor'].json.authoritative_context, raw_payload: $json.response }) }}"
+      }
+    },
+    {
+      "id": "node-verdict-switch",
+      "name": "FlowGuard Verdict Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1180, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.final_verdict }}",
+              "operation": "equals",
+              "value2": "VALID"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-idempotent-sink-proxy",
+      "name": "FlowGuard 4-State Idempotency FinOps Ledger Proxy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8090/api/v1/idempotent-execute",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workflow_id: 'wf-finops-03', domain: 'cloud_finops_provisioning', entity_id: $json.final_payload.request_id, operation: $json.final_payload.provisioning_decision, payload: $json.final_payload }) }}"
+      }
+    },
+    {
+      "id": "node-safe-escalation-dlq",
+      "name": "Safe FinOps Escalation & Audit Dead-Letter",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1440, 420],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "GitOps Infrastructure Quota Request Webhook": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Authoritative FinOps Ledger Context & Taint Auditor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Authoritative FinOps Ledger Context & Taint Auditor": {
+      "main": [
+        [
+          {
+            "node": "Ollama Local LLM FinOps Provisioning Agent (llama3:latest)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Local LLM FinOps Provisioning Agent (llama3:latest)": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Contract Validator & Two-Tier Recovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Contract Validator & Two-Tier Recovery": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Verdict Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Verdict Router": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard 4-State Idempotency FinOps Ledger Proxy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe FinOps Escalation & Audit Dead-Letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

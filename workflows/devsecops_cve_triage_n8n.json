@@ -1,0 +1,171 @@
+{
+  "name": "FlowGuard Domain 2 - DevSecOps CI/CD CVE & Secret Triage Gate",
+  "active": false,
+  "versionId": "flowguard-devsecops-v1",
+  "meta": {
+    "execution_mode_label": "exportable_n8n_workflow_json",
+    "domain": "devsecops_cve_triage",
+    "author": "Iyed Mohamed (ORCID: 0009-0008-9493-7510)",
+    "flowguard_contract_version": "0.1.0"
+  },
+  "nodes": [
+    {
+      "id": "node-webhook-scanner",
+      "name": "GitHub Actions & Trivy Scanner Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "devsecops/cve-triage",
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "id": "node-context-taint-audit",
+      "name": "FlowGuard Authoritative Scanner Context & Taint Auditor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const body = $input.item.json;\nreturn {\n  json: {\n    authoritative_context: {\n      pr_number: body.pr_number,\n      repository: body.repository,\n      cve_id: body.cve_id,\n      cvss_score: body.cvss_score,\n      secret_detected: body.secret_detected\n    },\n    untrusted_pr_title_and_body: body.untrusted_pr_title_and_body || ''\n  }\n};"
+      }
+    },
+    {
+      "id": "node-ollama-agent",
+      "name": "Ollama Local LLM Security Triage Agent (llama3:latest)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3:latest', stream: false, format: 'json', options: { temperature: 0.0 }, prompt: 'Produce JSON matching DevSecOpsCveAndSecretTriageContract for PR ' + $json.authoritative_context.pr_number }) }}"
+      }
+    },
+    {
+      "id": "node-flowguard-verify-recover",
+      "name": "FlowGuard Contract Validator & Two-Tier Recovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8090/api/v1/verify-and-recover",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ domain: 'devsecops_cve_triage', context: $node['FlowGuard Authoritative Scanner Context & Taint Auditor'].json.authoritative_context, raw_payload: $json.response }) }}"
+      }
+    },
+    {
+      "id": "node-verdict-switch",
+      "name": "FlowGuard Verdict Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1180, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.final_verdict }}",
+              "operation": "equals",
+              "value2": "VALID"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-idempotent-sink-proxy",
+      "name": "FlowGuard 4-State Idempotency Merge Gate Proxy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8090/api/v1/idempotent-execute",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workflow_id: 'wf-devsecops-02', domain: 'devsecops_cve_triage', entity_id: $json.final_payload.pr_number, operation: $json.final_payload.merge_decision, payload: $json.final_payload }) }}"
+      }
+    },
+    {
+      "id": "node-safe-escalation-dlq",
+      "name": "Safe AppSec Escalation & Audit Dead-Letter",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1440, 420],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "GitHub Actions & Trivy Scanner Webhook": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Authoritative Scanner Context & Taint Auditor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Authoritative Scanner Context & Taint Auditor": {
+      "main": [
+        [
+          {
+            "node": "Ollama Local LLM Security Triage Agent (llama3:latest)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Local LLM Security Triage Agent (llama3:latest)": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Contract Validator & Two-Tier Recovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Contract Validator & Two-Tier Recovery": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Verdict Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Verdict Router": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard 4-State Idempotency Merge Gate Proxy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe AppSec Escalation & Audit Dead-Letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

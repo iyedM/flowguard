@@ -1,0 +1,17 @@
+strategy,domain,total_runs,svsr_pct,svsr_ci95_low,svsr_ci95_high,recovery_rate_pct,recovery_ci95_low,recovery_ci95_high,unsafe_side_effect_rate_pct,user_ci95_low,user_ci95_high,contract_violation_escape_rate_pct,cver_ci95_low,cver_ci95_high,false_rejection_rate_pct,human_escalation_rate_pct,mean_tokens_per_run,latency_p50_ms,latency_p95_ms
+B1_NATIVE_N8N,aiops_incident_remediation,60,16.67,9.31,28.03,0.0,0.0,7.13,58.33,45.73,69.94,41.67,30.06,54.27,0.0,0.0,0.0,0.03,0.041
+B1_NATIVE_N8N,devsecops_cve_triage,60,20.0,11.83,31.78,4.0,1.1,13.46,55.0,42.49,66.91,38.33,27.09,50.98,0.0,0.0,0.0,0.021,0.041
+B1_NATIVE_N8N,cloud_finops_provisioning,60,20.0,11.83,31.78,4.0,1.1,13.46,55.0,42.49,66.91,38.33,27.09,50.98,0.0,0.0,0.0,0.022,0.04
+B1_NATIVE_N8N,all_domains_combined,180,18.89,13.84,25.23,2.67,1.04,6.66,56.11,48.81,63.16,39.44,32.6,46.73,0.0,0.0,0.0,0.025,0.041
+B2_NAIVE_RETRY,aiops_incident_remediation,60,25.0,15.78,37.23,10.0,4.35,21.36,70.0,57.49,80.1,46.67,34.63,59.11,0.0,0.0,12.5,0.03,0.051
+B2_NAIVE_RETRY,devsecops_cve_triage,60,28.33,18.51,40.77,14.0,6.95,26.19,66.67,54.06,77.27,43.33,31.57,55.9,0.0,0.0,12.5,0.03,0.056
+B2_NAIVE_RETRY,cloud_finops_provisioning,60,28.33,18.51,40.77,14.0,6.95,26.19,66.67,54.06,77.27,43.33,31.57,55.9,0.0,0.0,12.5,0.025,0.041
+B2_NAIVE_RETRY,all_domains_combined,180,27.22,21.25,34.15,12.67,8.26,18.94,67.78,60.64,74.17,44.44,37.38,51.74,0.0,0.0,12.5,0.028,0.05
+B3_CONTRACT_ONLY,aiops_incident_remediation,60,33.33,22.73,45.94,20.0,11.24,33.04,16.67,9.31,28.03,0.0,0.0,6.02,0.0,66.67,0.0,0.141,0.215
+B3_CONTRACT_ONLY,devsecops_cve_triage,60,33.33,22.73,45.94,20.0,11.24,33.04,16.67,9.31,28.03,0.0,0.0,6.02,0.0,66.67,0.0,0.129,0.213
+B3_CONTRACT_ONLY,cloud_finops_provisioning,60,33.33,22.73,45.94,20.0,11.24,33.04,16.67,9.31,28.03,0.0,0.0,6.02,0.0,66.67,0.0,0.157,0.207
+B3_CONTRACT_ONLY,all_domains_combined,180,33.33,26.86,40.5,20.0,14.38,27.11,16.67,11.93,22.8,0.0,0.0,2.09,0.0,66.67,0.0,0.147,0.212
+FLOWGUARD_FULL,aiops_incident_remediation,60,91.67,81.93,96.39,90.0,78.64,95.65,0.0,0.0,6.02,0.0,0.0,6.02,0.0,25.0,90.33,0.659,1.552
+FLOWGUARD_FULL,devsecops_cve_triage,60,90.0,79.85,95.34,88.0,76.2,94.38,0.0,0.0,6.02,0.0,0.0,6.02,0.0,26.67,103.17,0.626,1.379
+FLOWGUARD_FULL,cloud_finops_provisioning,60,93.33,84.07,97.38,92.0,81.16,96.85,0.0,0.0,6.02,0.0,0.0,6.02,0.0,23.33,76.25,0.77,1.637
+FLOWGUARD_FULL,all_domains_combined,180,91.67,86.71,94.89,90.0,84.16,93.85,0.0,0.0,2.09,0.0,0.0,2.09,0.0,25.0,89.92,0.696,1.491

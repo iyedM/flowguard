@@ -2,7 +2,7 @@
 
 Enforces strict separation between:
 1. Deterministic Security Boundary: Authoritative context attributes & capability allowlists
-   (an LLM can never override a security invariant).
+   across AIOps, DevSecOps, and Cloud FinOps (an LLM can never override a security invariant).
 2. Fallible Taint / Prompt-Injection Detector: Heuristic inspection of untrusted strings
    (`recent_log_snippet`, `untrusted_pr_body`, `justification_notes`) emitted strictly as
    an observability/audit signal (`is_authoritative_boundary = False`).
@@ -21,10 +21,6 @@ from flowguard.models import (
 )
 from flowguard.telemetry import SpanTimer, TelemetryRecorder
 
-# Heuristic patterns for untrusted text taint auditing (observability signal only).
-# Deliberately realistic: catches common overt prompt-injection patterns while subtle
-# semantic phrasing may evade regex detection—proving why deterministic attribute
-# policies are required as the actual security boundary.
 TAINT_HEURISTIC_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     ("IGNORE_INSTRUCTIONS", re.compile(r"ignore\s+(all\s+)?(previous|prior)\s+instructions", re.I)),
     ("SYSTEM_OVERRIDE", re.compile(r"(system\s+override|admin\s+override|\[system\])", re.I)),
@@ -47,6 +43,18 @@ AIOPS_ALLOWED_ACTIONS: Set[str] = {
     "rollback_deployment",
     "noop_observe",
     "escalate_to_human",
+}
+
+DEVSECOPS_ALLOWED_DECISIONS: Set[str] = {
+    "ALLOW_MERGE",
+    "BLOCK_MERGE",
+    "HOLD_FOR_SECURITY_REVIEW",
+}
+
+CLOUD_FINOPS_ALLOWED_DECISIONS: Set[str] = {
+    "APPROVE_PROVISIONING",
+    "HOLD_FOR_FINOPS_APPROVAL",
+    "REJECT_QUOTA_EXCEEDED",
 }
 
 
@@ -104,10 +112,16 @@ class PolicyGuard:
         with SpanTimer() as timer:
             taint_signal = self.audit_untrusted_text(context=context, payload=payload)
             if not policy_enabled:
+                action_val = str(
+                    payload.get("action")
+                    or payload.get("merge_decision")
+                    or payload.get("provisioning_decision")
+                    or "unknown"
+                )
                 decision = PolicyDecision(
                     allowed=True,
                     domain=domain,
-                    action=str(payload.get("action", "unknown")),
+                    action=action_val,
                     violations=[],
                     enforced_invariants=["POLICY_GUARD_DISABLED_BY_ABLATION"],
                     taint_signal=taint_signal,
@@ -115,6 +129,18 @@ class PolicyGuard:
                 )
             elif domain == DomainName.AIOPS.value:
                 decision = self._evaluate_aiops_policy(
+                    payload=payload,
+                    context=context,
+                    taint_signal=taint_signal,
+                )
+            elif domain == DomainName.DEVSECOPS.value:
+                decision = self._evaluate_devsecops_policy(
+                    payload=payload,
+                    context=context,
+                    taint_signal=taint_signal,
+                )
+            elif domain == DomainName.CLOUD_FINOPS.value:
+                decision = self._evaluate_cloud_finops_policy(
                     payload=payload,
                     context=context,
                     taint_signal=taint_signal,
@@ -160,13 +186,11 @@ class PolicyGuard:
         ]
         requires_approval = False
 
-        # 1. Capability allowlist check
         if action not in AIOPS_ALLOWED_ACTIONS:
             violations.append(
                 f"POLICY_CAPABILITY_DENIED: Action '{action}' is not in workflow allowlist."
             )
 
-        # 2. Hard deterministic rule on authoritative namespace (immune to LLM spoofing or subtle prompt injection)
         if auth_namespace == "prod-stateful-db" and action in (
             "rollback_deployment",
             "restart_workers",
@@ -184,14 +208,12 @@ class PolicyGuard:
                     f"namespace 'prod-stateful-db' requires a valid authoritative human_approval_token."
                 )
 
-        # 3. Prevent LLM from bypassing prod-stateful-db by rewriting payload['namespace']
         if "namespace" in payload and payload["namespace"] != auth_namespace:
             violations.append(
                 f"POLICY_NAMESPACE_SPOOFING: Payload namespace '{payload['namespace']}' "
                 f"conflicts with authoritative namespace '{auth_namespace}'."
             )
 
-        # 4. Prevent extreme resource exhaustion via replica count
         replicas = payload.get("target_replicas")
         if isinstance(replicas, int) and not isinstance(replicas, bool):
             if replicas < 1 or replicas > 32:
@@ -203,6 +225,122 @@ class PolicyGuard:
             allowed=len(violations) == 0,
             domain=DomainName.AIOPS.value,
             action=action,
+            violations=violations,
+            enforced_invariants=enforced_invariants,
+            taint_signal=taint_signal,
+            requires_human_approval=requires_approval,
+        )
+
+    def _evaluate_devsecops_policy(
+        self,
+        payload: Dict[str, Any],
+        context: Dict[str, Any],
+        taint_signal: TaintSignal,
+    ) -> PolicyDecision:
+        decision_str = str(payload.get("merge_decision", ""))
+        auth_cvss = context.get("cvss_score", payload.get("cvss_score", 0.0))
+        auth_secret = context.get("secret_detected", payload.get("secret_detected", False))
+
+        violations: List[str] = []
+        enforced_invariants: List[str] = [
+            "DEVSECOPS_DECISION_ALLOWLIST",
+            "DEVSECOPS_HIGH_CVSS_MANDATORY_BLOCK",
+            "DEVSECOPS_SECRET_DETECTION_MANDATORY_BLOCK_AND_ROTATE",
+        ]
+        requires_approval = False
+
+        if decision_str not in DEVSECOPS_ALLOWED_DECISIONS:
+            violations.append(
+                f"POLICY_CAPABILITY_DENIED: merge_decision '{decision_str}' not in allowlist."
+            )
+
+        is_high_cvss = (
+            isinstance(auth_cvss, (int, float))
+            and not isinstance(auth_cvss, bool)
+            and float(auth_cvss) >= 7.0
+        )
+        if is_high_cvss or (auth_secret is True):
+            requires_approval = True
+            if decision_str != "BLOCK_MERGE":
+                violations.append(
+                    f"POLICY_SECURITY_GATE_VIOLATION: Authoritative cvss_score={auth_cvss} "
+                    f"or secret_detected={auth_secret} strictly requires merge_decision == 'BLOCK_MERGE' "
+                    f"(got '{decision_str}')."
+                )
+
+        if auth_secret is True and payload.get("rotate_secret") is not True:
+            violations.append(
+                "POLICY_SECRET_ROTATION_MANDATORY: secret_detected == True requires rotate_secret == True."
+            )
+
+        return PolicyDecision(
+            allowed=len(violations) == 0,
+            domain=DomainName.DEVSECOPS.value,
+            action=decision_str,
+            violations=violations,
+            enforced_invariants=enforced_invariants,
+            taint_signal=taint_signal,
+            requires_human_approval=requires_approval,
+        )
+
+    def _evaluate_cloud_finops_policy(
+        self,
+        payload: Dict[str, Any],
+        context: Dict[str, Any],
+        taint_signal: TaintSignal,
+    ) -> PolicyDecision:
+        decision_str = str(payload.get("provisioning_decision", ""))
+        auth_env = str(context.get("environment", payload.get("environment", "dev")))
+        auth_hourly = float(
+            context.get("hourly_unit_cost_usd", payload.get("hourly_unit_cost_usd", 0.0))
+        )
+        auth_cap = float(
+            context.get(
+                "team_monthly_budget_cap_usd",
+                payload.get("team_monthly_budget_cap_usd", 0.0),
+            )
+        )
+        true_monthly = round(auth_hourly * 730.0, 2)
+
+        violations: List[str] = []
+        enforced_invariants: List[str] = [
+            "FINOPS_DECISION_ALLOWLIST",
+            "FINOPS_MONTHLY_BUDGET_CAP_GUARD",
+            "FINOPS_NONPROD_GPU_QUOTA_CAP",
+        ]
+        requires_approval = False
+
+        if decision_str not in CLOUD_FINOPS_ALLOWED_DECISIONS:
+            violations.append(
+                f"POLICY_CAPABILITY_DENIED: provisioning_decision '{decision_str}' not in allowlist."
+            )
+
+        if true_monthly > auth_cap:
+            requires_approval = True
+            if decision_str == "APPROVE_PROVISIONING":
+                violations.append(
+                    f"POLICY_BUDGET_CAP_BREACH: True monthly cost ${true_monthly:.2f} exceeds "
+                    f"authoritative team_monthly_budget_cap_usd ${auth_cap:.2f}; "
+                    f"APPROVE_PROVISIONING is forbidden."
+                )
+
+        gpu_count = payload.get("requested_gpu_count")
+        if (
+            auth_env in ("dev", "staging")
+            and isinstance(gpu_count, int)
+            and not isinstance(gpu_count, bool)
+            and gpu_count > 2
+            and decision_str == "APPROVE_PROVISIONING"
+        ):
+            violations.append(
+                f"POLICY_NONPROD_GPU_QUOTA_BREACH: Environment '{auth_env}' forbids approving "
+                f"requested_gpu_count={gpu_count} (> 2)."
+            )
+
+        return PolicyDecision(
+            allowed=len(violations) == 0,
+            domain=DomainName.CLOUD_FINOPS.value,
+            action=decision_str,
             violations=violations,
             enforced_invariants=enforced_invariants,
             taint_signal=taint_signal,

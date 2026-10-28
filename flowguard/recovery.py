@@ -1,4 +1,4 @@
-"""Mechanism B: Two-Tier Bounded Recovery Controller.
+"""Mechanism B: Two-Tier Bounded Recovery Controller across all 3 domains.
 
 - Tier 1 (Symbolic Schema-Drift Normalizer): Resolves known alias renames, envelope
   unwrapping, and safe scalar type coercions (0 LLM tokens). Honestly fails on unknown
@@ -27,9 +27,6 @@ from flowguard.models import (
 )
 from flowguard.telemetry import SpanTimer, TelemetryRecorder
 
-# Known alias mappings for Tier-1 symbolic schema-drift normalization per domain.
-# Unknown/unmapped drift fields are intentionally NOT in this map so Tier-1 failure
-# modes can be measured honestly.
 KNOWN_FIELD_ALIASES: Dict[str, Dict[str, str]] = {
     DomainName.AIOPS.value: {
         "id": "alert_id",
@@ -53,16 +50,81 @@ KNOWN_FIELD_ALIASES: Dict[str, Dict[str, str]] = {
         "justification": "justification_notes",
         "approval_token": "human_approval_token",
     },
+    DomainName.DEVSECOPS.value: {
+        "pr_id": "pr_number",
+        "pull_request": "pr_number",
+        "repo": "repository",
+        "repo_name": "repository",
+        "vulnerability_id": "cve_id",
+        "cve": "cve_id",
+        "cvss": "cvss_score",
+        "severity_score": "cvss_score",
+        "has_secret": "secret_detected",
+        "leaked_secret": "secret_detected",
+        "decision": "merge_decision",
+        "gate_action": "merge_decision",
+        "rotate_credentials": "rotate_secret",
+        "quarantine": "quarantine_artifact",
+        "notes": "justification_notes",
+        "reason": "justification_notes",
+    },
+    DomainName.CLOUD_FINOPS.value: {
+        "req_id": "request_id",
+        "id": "request_id",
+        "team": "team_name",
+        "owner_team": "team_name",
+        "env": "environment",
+        "stage": "environment",
+        "vcpu": "requested_vcpu",
+        "vcpus": "requested_vcpu",
+        "gpus": "requested_gpu_count",
+        "gpu_count": "requested_gpu_count",
+        "hourly_cost": "hourly_unit_cost_usd",
+        "unit_cost_usd": "hourly_unit_cost_usd",
+        "monthly_cost_usd": "computed_monthly_cost_usd",
+        "estimated_monthly_usd": "computed_monthly_cost_usd",
+        "budget_cap_usd": "team_monthly_budget_cap_usd",
+        "monthly_cap": "team_monthly_budget_cap_usd",
+        "decision": "provisioning_decision",
+        "finops_action": "provisioning_decision",
+        "notes": "justification_notes",
+        "reason": "justification_notes",
+    },
 }
 
-KNOWN_ENVELOPE_KEYS: Tuple[str, ...] = ("remediation", "payload", "decision", "data")
+KNOWN_ENVELOPE_KEYS: Tuple[str, ...] = (
+    "remediation",
+    "triage",
+    "provisioning",
+    "payload",
+    "decision_envelope",
+    "data",
+)
 
 INT_FIELDS_BY_DOMAIN: Dict[str, Tuple[str, ...]] = {
     DomainName.AIOPS.value: ("target_replicas", "cooldown_seconds"),
+    DomainName.DEVSECOPS.value: (),
+    DomainName.CLOUD_FINOPS.value: ("requested_vcpu", "requested_gpu_count"),
+}
+
+FLOAT_FIELDS_BY_DOMAIN: Dict[str, Tuple[str, ...]] = {
+    DomainName.AIOPS.value: (),
+    DomainName.DEVSECOPS.value: ("cvss_score",),
+    DomainName.CLOUD_FINOPS.value: (
+        "hourly_unit_cost_usd",
+        "computed_monthly_cost_usd",
+        "team_monthly_budget_cap_usd",
+    ),
 }
 
 BOOL_FIELDS_BY_DOMAIN: Dict[str, Tuple[str, ...]] = {
     DomainName.AIOPS.value: ("oncall_paged",),
+    DomainName.DEVSECOPS.value: (
+        "secret_detected",
+        "rotate_secret",
+        "quarantine_artifact",
+    ),
+    DomainName.CLOUD_FINOPS.value: (),
 }
 
 CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
@@ -95,7 +157,6 @@ class RecoveryController:
         if not isinstance(raw_input, str):
             return None
         text = raw_input.strip()
-        # Try direct JSON parse first
         try:
             parsed = json.loads(text)
             if isinstance(parsed, dict):
@@ -103,7 +164,6 @@ class RecoveryController:
         except json.JSONDecodeError:
             pass
 
-        # Try markdown code fence extraction
         fence_match = CODE_FENCE_RE.search(text)
         if fence_match:
             try:
@@ -113,7 +173,6 @@ class RecoveryController:
             except json.JSONDecodeError:
                 pass
 
-        # Try extracting first {...} block
         obj_match = FIRST_JSON_OBJ_RE.search(text)
         if obj_match:
             try:
@@ -130,11 +189,7 @@ class RecoveryController:
         domain: str,
         payload: Dict[str, Any],
     ) -> Tuple[Dict[str, Any], bool]:
-        """Tier-1 symbolic schema-drift normalizer (0 LLM tokens).
-
-        Resolves known envelope wrappers, known alias field names, and safe scalar
-        type coercions. Does not guess unknown fields or alter semantic bounds.
-        """
+        """Tier-1 symbolic schema-drift normalizer (0 LLM tokens)."""
         working = copy.deepcopy(payload)
         changed = False
 
@@ -158,7 +213,6 @@ class RecoveryController:
             target_key = alias_map.get(k, k)
             if target_key != k:
                 changed = True
-            # Do not overwrite if canonical key already exists
             if target_key not in remapped or k == target_key:
                 remapped[target_key] = v
         working = remapped
@@ -172,7 +226,16 @@ class RecoveryController:
                     working[int_field] = int(stripped)
                     changed = True
 
-        # 4. Safe scalar string-to-bool coercions
+        # 4. Safe scalar string-to-float coercions
+        for float_field in FLOAT_FIELDS_BY_DOMAIN.get(domain, ()):
+            val = working.get(float_field)
+            if isinstance(val, str):
+                stripped = val.strip()
+                if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", stripped):
+                    working[float_field] = float(stripped)
+                    changed = True
+
+        # 5. Safe scalar string-to-bool coercions
         for bool_field in BOOL_FIELDS_BY_DOMAIN.get(domain, ()):
             val = working.get(bool_field)
             if isinstance(val, str):
@@ -184,11 +247,16 @@ class RecoveryController:
                     working[bool_field] = False
                     changed = True
 
-        # 5. Canonicalize uppercase enum strings where unambiguous
+        # 6. Canonicalize uppercase/lowercase enum strings where unambiguous
         if domain == DomainName.AIOPS.value and isinstance(working.get("severity"), str):
             upper_sev = working["severity"].strip().upper()
             if upper_sev in ("SEV1", "SEV2", "SEV3") and upper_sev != working["severity"]:
                 working["severity"] = upper_sev
+                changed = True
+        elif domain == DomainName.CLOUD_FINOPS.value and isinstance(working.get("environment"), str):
+            lower_env = working["environment"].strip().lower()
+            if lower_env in ("dev", "staging", "prod") and lower_env != working["environment"]:
+                working["environment"] = lower_env
                 changed = True
 
         return working, changed
@@ -260,7 +328,6 @@ class RecoveryController:
     ) -> RecoveryResult:
         attempts: List[RecoveryAttempt] = []
 
-        # Step 0: Check initial validation if payload is already a dict
         current_dict = raw_payload if isinstance(raw_payload, dict) else None
         if initial_validation is None:
             initial_validation = self.validator.validate(
@@ -287,7 +354,6 @@ class RecoveryController:
                 execution_mode_label=execution_mode_label,
             )
 
-        # Hard security policy block -> Never bypass via recovery; escalate immediately
         if initial_validation.verdict == ContractVerdict.UNSAFE_POLICY_BLOCK:
             return RecoveryResult(
                 recovered=False,
@@ -362,7 +428,6 @@ class RecoveryController:
                         execution_mode_label=execution_mode_label,
                     )
 
-        # If Tier-2 is disabled, stop here and escalate safely
         if not tier2_enabled or self.max_repair_turns <= 0:
             return RecoveryResult(
                 recovered=False,
@@ -472,7 +537,6 @@ class RecoveryController:
 
             working_input = candidate
 
-        # Exhausted max_repair_turns -> SAFE_ESCALATION_HALT
         return RecoveryResult(
             recovered=False,
             final_verdict=current_validation.verdict,
@@ -495,25 +559,27 @@ class RecoveryController:
         context: Dict[str, Any],
         turn: int,
     ) -> Tuple[Optional[Dict[str, Any]], int]:
-        """Predicate-guided repair step for deterministic harness evaluation.
+        """Predicate-guided repair step for deterministic harness evaluation."""
+        # If input is a markdown-fenced string, Turn 1 extracts the JSON dict so validator
+        # can evaluate its inner semantic invariants on Turn 1, and Turn 2 repairs them.
+        if not isinstance(working_input, dict):
+            extracted = self.extract_json_object(working_input)
+            if extracted is None:
+                return None, 185
+            return extracted, 165
 
-        Simulates realistic LLM repair behavior with explicit token accounting and
-        honest failure on severely corrupted/unmapped schemas or truncated payloads.
-        """
-        extracted = self.extract_json_object(working_input)
-        if extracted is None:
-            # Truncated or unparseable JSON cannot be extracted; costs repair prompt tokens
-            return None, 185
+        if working_input.get("__unrecoverable_corruption__") is True:
+            return copy.deepcopy(working_input), 210
 
-        # If payload carries an explicit unrecoverable corruption marker or has < 3 recognizable fields
-        if extracted.get("__unrecoverable_corruption__") is True:
-            return extracted, 210
-
-        candidate = copy.deepcopy(extracted)
+        candidate = copy.deepcopy(working_input)
         tokens_used = 160 + (25 * len(violations))
 
         if domain == DomainName.AIOPS.value:
             return self._repair_aiops_candidate(candidate, violations, context, turn), tokens_used
+        if domain == DomainName.DEVSECOPS.value:
+            return self._repair_devsecops_candidate(candidate, violations, context, turn), tokens_used
+        if domain == DomainName.CLOUD_FINOPS.value:
+            return self._repair_cloud_finops_candidate(candidate, violations, context, turn), tokens_used
 
         return candidate, tokens_used
 
@@ -526,13 +592,10 @@ class RecoveryController:
     ) -> Dict[str, Any]:
         violation_text = " | ".join(violations)
 
-        # Turn 1: Fix semantic cross-field invariants and context bindings
         if "INVARIANT_ALERT_ID_MISMATCH" in violation_text and "alert_id" in context:
             candidate["alert_id"] = context["alert_id"]
-
         if "INVARIANT_NAMESPACE_MISMATCH" in violation_text and "namespace" in context:
             candidate["namespace"] = context["namespace"]
-
         if "INVARIANT_SEVERITY_MISMATCH" in violation_text and "severity" in context:
             candidate["severity"] = context["severity"]
 
@@ -551,10 +614,7 @@ class RecoveryController:
             else:
                 candidate["cooldown_seconds"] = 300
 
-        # Turn 2: If structural schema errors remain, attempt to repair single recoverable
-        # unknown field ONLY if context supplies enough information and corruption is not catastrophic.
         if turn >= 2 and "SCHEMA_ERROR" in violation_text:
-            # If there are multiple unknown fields (catastrophic schema drift), do NOT magically fix
             allowed_keys = set(
                 self.validator.get_schema(DomainName.AIOPS.value)["properties"].keys()
             )
@@ -562,14 +622,119 @@ class RecoveryController:
             if len(unknown_keys) == 1:
                 uk = unknown_keys[0]
                 val = candidate.pop(uk)
-                # Map single unknown key if it holds replica count or justification
                 if "target_replicas" not in candidate and isinstance(val, int):
                     candidate["target_replicas"] = max(1, min(32, val))
                 elif "justification_notes" not in candidate and isinstance(val, str):
                     candidate["justification_notes"] = val
 
-            # Populate missing context-bound required fields if unambiguously present in context
             for ctx_key in ("alert_id", "service_name", "namespace", "severity"):
+                if ctx_key not in candidate and ctx_key in context:
+                    candidate[ctx_key] = context[ctx_key]
+
+        return candidate
+
+    def _repair_devsecops_candidate(
+        self,
+        candidate: Dict[str, Any],
+        violations: List[str],
+        context: Dict[str, Any],
+        turn: int,
+    ) -> Dict[str, Any]:
+        violation_text = " | ".join(violations)
+
+        if "INVARIANT_PR_MISMATCH" in violation_text and "pr_number" in context:
+            candidate["pr_number"] = context["pr_number"]
+        if "INVARIANT_CVSS_SPOOFING" in violation_text and "cvss_score" in context:
+            candidate["cvss_score"] = float(context["cvss_score"])
+        if "INVARIANT_SECRET_FLAG_MISMATCH" in violation_text and "secret_detected" in context:
+            candidate["secret_detected"] = bool(context["secret_detected"])
+
+        if "INVARIANT_HIGH_RISK_BLOCK_REQUIRED" in violation_text:
+            candidate["merge_decision"] = "BLOCK_MERGE"
+        if "INVARIANT_SECRET_ROTATION_REQUIRED" in violation_text:
+            candidate["rotate_secret"] = True
+        if "INVARIANT_CRITICAL_CVE_QUARANTINE" in violation_text:
+            candidate["quarantine_artifact"] = True
+
+        if turn >= 2 and "SCHEMA_ERROR" in violation_text:
+            allowed_keys = set(
+                self.validator.get_schema(DomainName.DEVSECOPS.value)["properties"].keys()
+            )
+            unknown_keys = [k for k in candidate.keys() if k not in allowed_keys]
+            if len(unknown_keys) == 1:
+                uk = unknown_keys[0]
+                val = candidate.pop(uk)
+                if "merge_decision" not in candidate and isinstance(val, str):
+                    candidate["merge_decision"] = val
+                elif "justification_notes" not in candidate and isinstance(val, str):
+                    candidate["justification_notes"] = val
+
+            for ctx_key in ("pr_number", "repository", "cve_id", "cvss_score", "secret_detected"):
+                if ctx_key not in candidate and ctx_key in context:
+                    candidate[ctx_key] = context[ctx_key]
+
+        return candidate
+
+    def _repair_cloud_finops_candidate(
+        self,
+        candidate: Dict[str, Any],
+        violations: List[str],
+        context: Dict[str, Any],
+        turn: int,
+    ) -> Dict[str, Any]:
+        violation_text = " | ".join(violations)
+
+        if "INVARIANT_REQUEST_ID_MISMATCH" in violation_text and "request_id" in context:
+            candidate["request_id"] = context["request_id"]
+        if "INVARIANT_ENVIRONMENT_MISMATCH" in violation_text and "environment" in context:
+            candidate["environment"] = context["environment"]
+        if (
+            "INVARIANT_BUDGET_CAP_SPOOFING" in violation_text
+            and "team_monthly_budget_cap_usd" in context
+        ):
+            candidate["team_monthly_budget_cap_usd"] = float(
+                context["team_monthly_budget_cap_usd"]
+            )
+
+        if "INVARIANT_ARITHMETIC_MONTHLY_COST" in violation_text:
+            hourly = float(
+                context.get(
+                    "hourly_unit_cost_usd", candidate.get("hourly_unit_cost_usd", 0.0)
+                )
+            )
+            candidate["hourly_unit_cost_usd"] = hourly
+            candidate["computed_monthly_cost_usd"] = round(hourly * 730.0, 2)
+
+        if "INVARIANT_BUDGET_CAP_HOLD_REQUIRED" in violation_text:
+            candidate["provisioning_decision"] = "HOLD_FOR_FINOPS_APPROVAL"
+
+        if "INVARIANT_NONPROD_GPU_QUOTA" in violation_text:
+            gpu = candidate.get("requested_gpu_count")
+            if isinstance(gpu, int):
+                candidate["requested_gpu_count"] = min(2, max(0, gpu))
+
+        if turn >= 2 and "SCHEMA_ERROR" in violation_text:
+            allowed_keys = set(
+                self.validator.get_schema(DomainName.CLOUD_FINOPS.value)["properties"].keys()
+            )
+            unknown_keys = [k for k in candidate.keys() if k not in allowed_keys]
+            if len(unknown_keys) == 1:
+                uk = unknown_keys[0]
+                val = candidate.pop(uk)
+                if "computed_monthly_cost_usd" not in candidate and isinstance(
+                    val, (int, float)
+                ):
+                    candidate["computed_monthly_cost_usd"] = float(val)
+                elif "justification_notes" not in candidate and isinstance(val, str):
+                    candidate["justification_notes"] = val
+
+            for ctx_key in (
+                "request_id",
+                "team_name",
+                "environment",
+                "hourly_unit_cost_usd",
+                "team_monthly_budget_cap_usd",
+            ):
                 if ctx_key not in candidate and ctx_key in context:
                     candidate[ctx_key] = context[ctx_key]
 

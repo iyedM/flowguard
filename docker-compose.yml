@@ -1,0 +1,29 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.62.4
+    container_name: flowguard-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - GENERIC_TIMEZONE=UTC
+      - FLOWGUARD_SIDECAR_URL=http://flowguard-sidecar:8090
+    volumes:
+      - ./workflows:/home/node/.n8n/workflows:ro
+
+  flowguard-sidecar:
+    image: python:3.12-slim
+    container_name: flowguard-sidecar
+    working_dir: /workspace
+    command: ["python3", "-m", "flowguard.cli", "ui", "--port", "8090"]
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./:/workspace
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - PYTHONUNBUFFERED=1

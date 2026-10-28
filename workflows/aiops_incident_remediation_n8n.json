@@ -1,0 +1,171 @@
+{
+  "name": "FlowGuard Domain 1 - AIOps Incident Triage & Bounded Remediation",
+  "active": false,
+  "versionId": "flowguard-aiops-v1",
+  "meta": {
+    "execution_mode_label": "exportable_n8n_workflow_json",
+    "domain": "aiops_incident_remediation",
+    "author": "Iyed Mohamed (ORCID: 0009-0008-9493-7510)",
+    "flowguard_contract_version": "0.1.0"
+  },
+  "nodes": [
+    {
+      "id": "node-webhook-alert",
+      "name": "Prometheus Alertmanager Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aiops/incident-alert",
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "id": "node-context-taint-audit",
+      "name": "FlowGuard Authoritative Context & Taint Auditor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const body = $input.item.json;\nreturn {\n  json: {\n    authoritative_context: {\n      alert_id: body.alert_id,\n      service_name: body.service_name,\n      namespace: body.namespace,\n      severity: body.severity,\n      human_approval_token: body.human_approval_token || null\n    },\n    untrusted_telemetry: {\n      recent_log_snippet: body.recent_log_snippet || ''\n    },\n    metrics: {\n      cpu_throttle_pct: body.cpu_throttle_pct,\n      memory_psi: body.memory_psi,\n      error_rate_5xx: body.error_rate_5xx\n    }\n  }\n};"
+      }
+    },
+    {
+      "id": "node-ollama-agent",
+      "name": "Ollama Local LLM Triage Agent (llama3:latest)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3:latest', stream: false, format: 'json', options: { temperature: 0.0 }, prompt: 'Produce JSON matching AIOpsIncidentRemediationContract for alert ' + $json.authoritative_context.alert_id }) }}"
+      }
+    },
+    {
+      "id": "node-flowguard-verify-recover",
+      "name": "FlowGuard Contract Validator & Two-Tier Recovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8090/api/v1/verify-and-recover",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ domain: 'aiops_incident_remediation', context: $node['FlowGuard Authoritative Context & Taint Auditor'].json.authoritative_context, raw_payload: $json.response }) }}"
+      }
+    },
+    {
+      "id": "node-verdict-switch",
+      "name": "FlowGuard Verdict Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1180, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.final_verdict }}",
+              "operation": "equals",
+              "value2": "VALID"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-idempotent-sink-proxy",
+      "name": "FlowGuard 4-State Idempotency Sink Proxy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8090/api/v1/idempotent-execute",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workflow_id: 'wf-aiops-01', domain: 'aiops_incident_remediation', entity_id: $json.final_payload.alert_id, operation: $json.final_payload.action, payload: $json.final_payload }) }}"
+      }
+    },
+    {
+      "id": "node-safe-escalation-dlq",
+      "name": "Safe Human Escalation & Audit Dead-Letter",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1440, 420],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Prometheus Alertmanager Webhook": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Authoritative Context & Taint Auditor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Authoritative Context & Taint Auditor": {
+      "main": [
+        [
+          {
+            "node": "Ollama Local LLM Triage Agent (llama3:latest)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Local LLM Triage Agent (llama3:latest)": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Contract Validator & Two-Tier Recovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Contract Validator & Two-Tier Recovery": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard Verdict Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlowGuard Verdict Router": {
+      "main": [
+        [
+          {
+            "node": "FlowGuard 4-State Idempotency Sink Proxy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe Human Escalation & Audit Dead-Letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

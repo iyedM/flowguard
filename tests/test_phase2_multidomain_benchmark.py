@@ -156,8 +156,8 @@ def test_fault_injector_180_scenarios_structure() -> None:
     assert len(unrecoverable) == 15  # 5 per domain (1 F1 + 2 F2 + 2 F3)
 
 
-def test_full_720_benchmark_and_900_ablation_execution() -> None:
-    runner = BenchmarkRunner()
+def test_full_720_benchmark_and_900_ablation_execution(tmp_path: Path) -> None:
+    runner = BenchmarkRunner(results_dir=tmp_path)
     output = runner.run_full_benchmark_and_ablation()
 
     bench = output["benchmark"]

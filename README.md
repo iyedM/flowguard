@@ -1,7 +1,7 @@
 # FlowGuard: Contract-Aware Runtime Verification, Bounded Recovery & Side-Effect Idempotency for Agentic n8n Workflows
 
 **Author:** Iyed Mohamed (`ORCID: 0009-0008-9493-7510`, ESPRIT School of Engineering)  
-**Technical Report (PDF):** [`docs/FlowGuard_Technical_Report_Iyed_MOHAMED.pdf`](docs/FlowGuard_Technical_Report_Iyed_MOHAMED.pdf)
+**Technical Report (PDF, 8 Pages):** [`docs/FlowGuard_Technical_Report_Iyed_MOHAMED.pdf`](docs/FlowGuard_Technical_Report_Iyed_MOHAMED.pdf) | **Full Readable Paper (Markdown):** [`docs/FlowGuard_Technical_Report_Iyed_MOHAMED.md`](docs/FlowGuard_Technical_Report_Iyed_MOHAMED.md)
 
 ---
 
@@ -89,7 +89,7 @@ Every component and experimental result artifact in this repository carries an e
 ## 5. Quickstart & Reproducibility
 
 ```bash
-# 1. Run the full 42-test pytest suite (Phases 1–4 + 16 adversarial security tests)
+# 1. Run the full 46-test pytest suite (Phases 1–4 + 20 adversarial security & concurrency tests)
 .venv/bin/pytest -v
 
 # 2. Reproduce Experiment A (720 benchmark runs + 900 ablation runs)
@@ -98,10 +98,11 @@ Every component and experimental result artifact in this repository carries an e
 # 3. Reproduce Experiment B (Live local GPU inference with llama3:latest)
 .venv/bin/python3 -m flowguard.cli live-eval
 
-# 4. Regenerate SVG figures and PDF technical report from results/*.json
+# 4. Regenerate SVG figures, Markdown paper, and 8-page PDF technical report from results/*.json
 .venv/bin/python3 scripts/generate_figures.py
 .venv/bin/python3 scripts/generate_technical_report.py
 
 # 5. Launch the hardened Web Dashboard & Sidecar Verification Server
 .venv/bin/python3 -m flowguard.cli ui --port 8090
 ```
+

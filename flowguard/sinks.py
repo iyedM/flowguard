@@ -50,7 +50,10 @@ class BaseStatefulSimulatedSink:
                 return copy.deepcopy(self._committed_by_idem_key[idem_key])
 
             history = self._mutations_by_entity.get(entity_id, [])
-            if history:
+            matching = [
+                m for m in history if m.get("idem_key") in (idem_key, None)
+            ]
+            if matching:
                 snapshot = self._entity_state.get(entity_id, {})
                 return {
                     "committed_on_sink": True,

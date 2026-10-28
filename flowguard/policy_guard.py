@@ -10,6 +10,7 @@ Enforces strict separation between:
 
 from __future__ import annotations
 
+import hmac
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -196,11 +197,13 @@ class PolicyGuard:
             "restart_workers",
         ):
             requires_approval = True
+            payload_token = payload.get("human_approval_token")
             has_valid_auth_token = (
                 isinstance(auth_token, str)
+                and isinstance(payload_token, str)
                 and auth_token.startswith("APPROVAL-PROD-")
                 and len(auth_token) >= 16
-                and payload.get("human_approval_token") == auth_token
+                and hmac.compare_digest(payload_token.encode("utf-8"), auth_token.encode("utf-8"))
             )
             if not has_valid_auth_token:
                 violations.append(

@@ -35,6 +35,10 @@ class PostCommitTimeoutError(TimeoutError):
     """Raised when a downstream sink MUTATED state, but the HTTP response timed out in transit."""
 
 
+class IdempotencyPayloadMismatchError(ValueError):
+    """Raised when a caller reuses an existing idempotency key with a different payload hash (IETF Idempotency-Key conflict)."""
+
+
 class IdempotencyLedger:
     """Thread-safe SQLite WAL 4-state idempotency store and execution proxy."""
 
@@ -199,6 +203,13 @@ class IdempotencyLedger:
         now = time.time()
         with self._lock:
             existing = self.get_record(idem_key)
+
+            if existing is not None and existing.payload_hash != payload_hash:
+                raise IdempotencyPayloadMismatchError(
+                    f"IDEMPOTENCY_PAYLOAD_MISMATCH: Idempotency key '{idem_key}' was already registered "
+                    f"with payload_hash '{existing.payload_hash}', which conflicts with incoming "
+                    f"payload_hash '{payload_hash}'."
+                )
 
             # Case 1: Already COMMITTED -> Replay cached receipt without mutating sink
             if existing is not None and existing.state == IdempotencyState.COMMITTED:

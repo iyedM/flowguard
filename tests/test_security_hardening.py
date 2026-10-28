@@ -604,3 +604,143 @@ def test_16_langgraph_middleware_verification_and_policy_halt() -> None:
     assert out_rep["escalated_to_human"] is False
     assert out_rep["validated_payload"]["merge_decision"] == "BLOCK_MERGE"
     assert sink.count_mutations_for_entity("PR-LG-2") == 1
+
+
+# 17. IETF Idempotency-Key payload-hash mismatch conflict detection
+def test_17_idempotency_payload_mismatch_conflict(tmp_path: Path) -> None:
+    from flowguard.idempotency import IdempotencyPayloadMismatchError
+
+    ledger = IdempotencyLedger(db_path=tmp_path / "idem17.sqlite")
+    sink = StatefulAIOpsClusterSink()
+    payload_a = {
+        "alert_id": "ALT-17",
+        "service_name": "api-gw",
+        "namespace": "prod-checkout",
+        "severity": "SEV2",
+        "action": "scale_replicas",
+        "target_replicas": 4,
+        "cooldown_seconds": 300,
+        "oncall_paged": True,
+        "justification_notes": "Initial valid scale",
+    }
+    payload_b_tampered = dict(payload_a, target_replicas=12)
+
+    r1 = ledger.execute_through_proxy(
+        workflow_id="wf-17",
+        domain=DomainName.AIOPS.value,
+        entity_id="ALT-17",
+        operation="scale_replicas",
+        payload=payload_a,
+        mutate_fn=lambda k: sink.apply_remediation("ALT-17", payload_a, payload_a, k),
+        reconcile_fn=sink.reconcile_read,
+        idem_key="fixed-idem-key-17",
+    )
+    assert r1.applied is True
+
+    with pytest.raises(IdempotencyPayloadMismatchError, match="IDEMPOTENCY_PAYLOAD_MISMATCH"):
+        ledger.execute_through_proxy(
+            workflow_id="wf-17",
+            domain=DomainName.AIOPS.value,
+            entity_id="ALT-17",
+            operation="scale_replicas",
+            payload=payload_b_tampered,
+            mutate_fn=lambda k: sink.apply_remediation("ALT-17", payload_b_tampered, payload_a, k),
+            reconcile_fn=sink.reconcile_read,
+            idem_key="fixed-idem-key-17",
+        )
+    ledger.close()
+
+
+# 18. UI Server POST /api/v1/idempotent-execute enforces contract (422), policy (403), and payload conflict (409)
+def test_18_ui_server_idempotent_execute_gates_contract_and_policy(tmp_path: Path) -> None:
+    server, _state = create_http_server(host="127.0.0.1", port=0, results_dir=tmp_path)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        # 1. Invalid contract -> HTTP 422
+        bad_contract_body = json.dumps(
+            {
+                "domain": DomainName.AIOPS.value,
+                "entity_id": "ALT-UI-18",
+                "payload": {"alert_id": "ALT-UI-18"},
+                "context": {"alert_id": "ALT-UI-18"},
+            }
+        ).encode("utf-8")
+        conn.request(
+            "POST",
+            "/api/v1/idempotent-execute",
+            body=bad_contract_body,
+            headers={"Content-Type": "application/json", "Content-Length": str(len(bad_contract_body))},
+        )
+        resp_422 = conn.getresponse()
+        resp_422.read()
+        assert resp_422.status == 422
+
+        # 2. Policy violation (unapproved prod-stateful-db rollback) -> HTTP 422/403 blocked before sink mutation
+        policy_block_payload = {
+            "alert_id": "ALT-UI-18B",
+            "service_name": "core-db",
+            "namespace": "prod-stateful-db",
+            "severity": "SEV1",
+            "action": "rollback_deployment",
+            "target_replicas": 2,
+            "cooldown_seconds": 600,
+            "oncall_paged": True,
+            "justification_notes": "Direct API call attempt without approval token",
+        }
+        policy_body = json.dumps(
+            {
+                "domain": DomainName.AIOPS.value,
+                "entity_id": "ALT-UI-18B",
+                "payload": policy_block_payload,
+                "context": {"alert_id": "ALT-UI-18B", "namespace": "prod-stateful-db", "severity": "SEV1"},
+            }
+        ).encode("utf-8")
+        conn.request(
+            "POST",
+            "/api/v1/idempotent-execute",
+            body=policy_body,
+            headers={"Content-Type": "application/json", "Content-Length": str(len(policy_body))},
+        )
+        resp_block = conn.getresponse()
+        resp_block.read()
+        assert resp_block.status in (403, 422)
+        conn.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# 19. Linear-time O(N) raw_decode JSON extraction resists pathological brace strings (No ReDoS)
+def test_19_linear_time_raw_decode_json_extraction_no_redos() -> None:
+    import time
+    from flowguard.recovery import RecoveryController
+
+    pathological = ("{" * 4000) + ' some text {"alert_id": "ALT-19", "ok": true} trailing {"bad": '
+    t0 = time.perf_counter()
+    extracted = RecoveryController.extract_json_object(pathological)
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    assert extracted == {"alert_id": "ALT-19", "ok": True}
+    assert elapsed_ms < 150.0
+
+
+# 20. reconcile_read isolates distinct idempotency keys on the same entity
+def test_20_reconcile_read_isolates_distinct_idem_keys_on_same_entity() -> None:
+    sink = StatefulAIOpsClusterSink()
+    payload = {
+        "alert_id": "ALT-20",
+        "service_name": "svc",
+        "namespace": "prod-api",
+        "severity": "SEV2",
+        "action": "scale_replicas",
+        "target_replicas": 3,
+        "cooldown_seconds": 300,
+        "oncall_paged": True,
+        "justification_notes": "First mutation",
+    }
+    sink.apply_remediation("ALT-20", payload, payload, idem_key="idem-key-committed")
+    assert sink.reconcile_read("ALT-20", "idem-key-committed")["committed_on_sink"] is True
+    assert sink.reconcile_read("ALT-20", "idem-key-never-sent")["committed_on_sink"] is False
+

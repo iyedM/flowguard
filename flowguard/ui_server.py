@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from flowguard.contracts import ContractValidator
-from flowguard.idempotency import IdempotencyLedger
+from flowguard.idempotency import IdempotencyLedger, IdempotencyPayloadMismatchError
 from flowguard.models import DomainName
 from flowguard.policy_guard import PolicyGuard
 from flowguard.recovery import RecoveryController
@@ -281,6 +281,7 @@ def make_handler_class(app_state: FlowGuardAppState):
                 operation = body.get("operation", "execute")
                 payload = body.get("payload")
                 context = body.get("context", {})
+                idem_key = body.get("idem_key")
                 if (
                     not isinstance(domain, str)
                     or domain not in app_state.sinks
@@ -293,18 +294,51 @@ def make_handler_class(app_state: FlowGuardAppState):
                     )
                     return
 
-                sink = app_state.sinks[domain]
-                receipt = app_state.ledger.execute_through_proxy(
-                    workflow_id=str(body.get("workflow_id", f"wf-{domain}")),
-                    domain=domain,
-                    entity_id=entity_id,
-                    operation=str(operation),
-                    payload=payload,
-                    mutate_fn=lambda k: sink.apply_mutation(
-                        entity_id, payload, context if isinstance(context, dict) else {}, k
-                    ),
-                    reconcile_fn=sink.reconcile_read,
+                ctx_dict = context if isinstance(context, dict) else {}
+                val_res = app_state.validator.validate(
+                    domain=domain, payload=payload, context=ctx_dict
                 )
+                if not val_res.is_valid:
+                    self._send_json(
+                        422,
+                        {
+                            "error": "Contract validation failed prior to idempotent execution",
+                            "verdict": val_res.verdict.value,
+                            "violations": val_res.violations,
+                        },
+                    )
+                    return
+
+                pol_res = app_state.policy_guard.evaluate(
+                    domain=domain, payload=payload, context=ctx_dict
+                )
+                if not pol_res.allowed:
+                    self._send_json(
+                        403,
+                        {
+                            "error": "PolicyGuard blocked unsafe side-effect prior to execution",
+                            "violations": pol_res.violations,
+                        },
+                    )
+                    return
+
+                sink = app_state.sinks[domain]
+                try:
+                    receipt = app_state.ledger.execute_through_proxy(
+                        workflow_id=str(body.get("workflow_id", f"wf-{domain}")),
+                        domain=domain,
+                        entity_id=entity_id,
+                        operation=str(operation),
+                        payload=payload,
+                        mutate_fn=lambda k: sink.apply_mutation(
+                            entity_id, payload, ctx_dict, k
+                        ),
+                        reconcile_fn=sink.reconcile_read,
+                        idem_key=idem_key if isinstance(idem_key, str) else None,
+                    )
+                except IdempotencyPayloadMismatchError as exc:
+                    self._send_json(409, {"error": str(exc)})
+                    return
                 self._send_json(200, receipt.to_dict())
                 return
 

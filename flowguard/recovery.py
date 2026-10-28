@@ -128,7 +128,7 @@ BOOL_FIELDS_BY_DOMAIN: Dict[str, Tuple[str, ...]] = {
 }
 
 CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
-FIRST_JSON_OBJ_RE = re.compile(r"(\{.*\})", re.DOTALL)
+MAX_RAW_EXTRACT_CHARS: int = 65536
 
 RepairCallbackType = Callable[
     [Any, List[str], Dict[str, Any], int],
@@ -151,12 +151,12 @@ class RecoveryController:
 
     @staticmethod
     def extract_json_object(raw_input: Any) -> Optional[Dict[str, Any]]:
-        """Extract a dictionary from raw dict or markdown-fenced JSON string."""
+        """Extract a dictionary from raw dict or markdown-fenced JSON string in O(N) time."""
         if isinstance(raw_input, dict):
             return copy.deepcopy(raw_input)
         if not isinstance(raw_input, str):
             return None
-        text = raw_input.strip()
+        text = raw_input[:MAX_RAW_EXTRACT_CHARS].strip()
         try:
             parsed = json.loads(text)
             if isinstance(parsed, dict):
@@ -173,14 +173,19 @@ class RecoveryController:
             except json.JSONDecodeError:
                 pass
 
-        obj_match = FIRST_JSON_OBJ_RE.search(text)
-        if obj_match:
+        decoder = json.JSONDecoder()
+        search_pos = 0
+        while True:
+            brace_idx = text.find("{", search_pos)
+            if brace_idx == -1:
+                break
             try:
-                parsed = json.loads(obj_match.group(1))
+                parsed, _ = decoder.raw_decode(text, brace_idx)
                 if isinstance(parsed, dict):
                     return parsed
             except json.JSONDecodeError:
-                return None
+                pass
+            search_pos = brace_idx + 1
 
         return None
 

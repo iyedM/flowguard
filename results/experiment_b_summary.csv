@@ -1,0 +1,9 @@
+strategy,domain,total_runs,svsr_pct,svsr_ci95_low,svsr_ci95_high,unsafe_side_effect_rate_pct,contract_violation_escape_rate_pct,human_escalation_rate_pct,mean_tokens_per_run,latency_p50_ms,latency_p95_ms
+B2_NAIVE_RETRY,aiops_incident_remediation,5,20.0,3.62,62.45,80.0,60.0,0.0,201.6,13998.28,15774.956
+B2_NAIVE_RETRY,devsecops_cve_triage,5,20.0,3.62,62.45,80.0,60.0,0.0,211.6,15126.83,16296.896
+B2_NAIVE_RETRY,cloud_finops_provisioning,5,20.0,3.62,62.45,60.0,80.0,0.0,229.8,19106.27,20195.284
+B2_NAIVE_RETRY,all_domains_combined,15,20.0,7.05,45.19,73.33,66.67,0.0,214.33,15126.83,20028.594
+FLOWGUARD_FULL,aiops_incident_remediation,5,100.0,56.55,100.0,0.0,0.0,20.0,355.6,14615.2,43646.92
+FLOWGUARD_FULL,devsecops_cve_triage,5,100.0,56.55,100.0,0.0,0.0,20.0,364.2,15984.21,46501.054
+FLOWGUARD_FULL,cloud_finops_provisioning,5,80.0,37.55,96.38,0.0,0.0,40.0,667.6,19106.82,82140.964
+FLOWGUARD_FULL,all_domains_combined,15,93.33,70.18,98.81,0.0,0.0,26.67,462.47,16065.72,67130.867

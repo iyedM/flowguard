@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use FlowGuard in your research or engineering workflows, please cite it as below."
+title: "FlowGuard: Contract-Aware Runtime Verification, Bounded Recovery & Side-Effect Idempotency for Agentic n8n Workflows"
+version: 0.1.0
+date-released: "2026-10-28"
+url: "https://github.com/iyedM/flowguard"
+repository-code: "https://github.com/iyedM/flowguard"
+license: MIT
+authors:
+  - family-names: "Mohamed"
+    given-names: "Iyed"
+    orcid: "https://orcid.org/0009-0008-9493-7510"
+    affiliation: "ESPRIT School of Engineering"
+keywords:
+  - agentic-workflows
+  - runtime-verification
+  - idempotency
+  - n8n
+  - bounded-recovery
+  - prompt-injection-defense
+  - model-context-protocol

@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 540" width="1040" height="540" font-family="system-ui, -apple-system, sans-serif">
+<rect width="1040" height="540" fill="#ffffff"/>
+<text x="520" y="34" text-anchor="middle" font-size="17" font-weight="700" fill="#0f172a">Figure 3: Fault-Class Breakdown (F0–F5) &amp; Live Local GPU Evaluation (llama3:latest on RTX 2050)</text>
+<text x="520" y="54" text-anchor="middle" font-size="12" fill="#475569">Left: FlowGuard SVSR &amp; Escalation by Fault Class (deterministic_harness) | Right: Experiment B Live GPU Inference (live_llm_inference)</text>
+<text x="310.0" y="93" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">A. FlowGuard Outcome by Fault Class (30 Scenarios / Class)</text>
+<line x1="70" y1="435.0" x2="550" y2="435.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="439.0" text-anchor="end" font-size="11" fill="#64748b">0%</text>
+<line x1="70" y1="369.0" x2="550" y2="369.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="373.0" text-anchor="end" font-size="11" fill="#64748b">20%</text>
+<line x1="70" y1="303.0" x2="550" y2="303.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="307.0" text-anchor="end" font-size="11" fill="#64748b">40%</text>
+<line x1="70" y1="237.0" x2="550" y2="237.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="241.0" text-anchor="end" font-size="11" fill="#64748b">60%</text>
+<line x1="70" y1="171.0" x2="550" y2="171.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="175.0" text-anchor="end" font-size="11" fill="#64748b">80%</text>
+<line x1="70" y1="105.0" x2="550" y2="105.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="109.0" text-anchor="end" font-size="11" fill="#64748b">100%</text>
+<rect x="82.0" y="105.0" width="24" height="330.0" fill="#10b981" rx="2"/>
+<text x="94.0" y="100.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#065f46">100%</text>
+<rect x="110.0" y="435.0" width="24" height="1.5" fill="#6366f1" rx="2"/>
+<text x="122.0" y="430.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#3730a3">0%</text>
+<text x="108.0" y="455" text-anchor="middle" font-size="10" font-weight="600" fill="#1e293b">F0: Nominal</text>
+<rect x="162.0" y="138.0" width="24" height="297.0" fill="#10b981" rx="2"/>
+<text x="174.0" y="133.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#065f46">90%</text>
+<rect x="190.0" y="402.0" width="24" height="33.0" fill="#6366f1" rx="2"/>
+<text x="202.0" y="397.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#3730a3">10%</text>
+<text x="188.0" y="455" text-anchor="middle" font-size="10" font-weight="600" fill="#1e293b">F1: HTTP/Ambig</text>
+<rect x="242.0" y="171.0" width="24" height="264.0" fill="#10b981" rx="2"/>
+<text x="254.0" y="166.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#065f46">80%</text>
+<rect x="270.0" y="369.0" width="24" height="66.0" fill="#6366f1" rx="2"/>
+<text x="282.0" y="364.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#3730a3">20%</text>
+<text x="268.0" y="455" text-anchor="middle" font-size="10" font-weight="600" fill="#1e293b">F2: Drift</text>
+<rect x="322.0" y="171.0" width="24" height="264.0" fill="#10b981" rx="2"/>
+<text x="334.0" y="166.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#065f46">80%</text>
+<rect x="350.0" y="369.0" width="24" height="66.0" fill="#6366f1" rx="2"/>
+<text x="362.0" y="364.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#3730a3">20%</text>
+<text x="348.0" y="455" text-anchor="middle" font-size="10" font-weight="600" fill="#1e293b">F3: Malformed</text>
+<rect x="402.0" y="105.0" width="24" height="330.0" fill="#10b981" rx="2"/>
+<text x="414.0" y="100.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#065f46">100%</text>
+<rect x="430.0" y="435.0" width="24" height="1.5" fill="#6366f1" rx="2"/>
+<text x="442.0" y="430.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#3730a3">0%</text>
+<text x="428.0" y="455" text-anchor="middle" font-size="10" font-weight="600" fill="#1e293b">F4: Duplicate</text>
+<rect x="482.0" y="105.0" width="24" height="330.0" fill="#10b981" rx="2"/>
+<text x="494.0" y="100.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#065f46">100%</text>
+<rect x="510.0" y="105.0" width="24" height="330.0" fill="#6366f1" rx="2"/>
+<text x="522.0" y="100.0" text-anchor="middle" font-size="9.5" font-weight="700" fill="#3730a3">100%</text>
+<text x="508.0" y="455" text-anchor="middle" font-size="10" font-weight="600" fill="#1e293b">F5: Adversarial</text>
+<text x="805.0" y="93" text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">B. Experiment B: Live llama3:latest GPU Evaluation</text>
+<line x1="610" y1="435.0" x2="1000" y2="435.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="602" y="439.0" text-anchor="end" font-size="11" fill="#64748b">0%</text>
+<line x1="610" y1="369.0" x2="1000" y2="369.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="602" y="373.0" text-anchor="end" font-size="11" fill="#64748b">20%</text>
+<line x1="610" y1="303.0" x2="1000" y2="303.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="602" y="307.0" text-anchor="end" font-size="11" fill="#64748b">40%</text>
+<line x1="610" y1="237.0" x2="1000" y2="237.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="602" y="241.0" text-anchor="end" font-size="11" fill="#64748b">60%</text>
+<line x1="610" y1="171.0" x2="1000" y2="171.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="602" y="175.0" text-anchor="end" font-size="11" fill="#64748b">80%</text>
+<line x1="610" y1="105.0" x2="1000" y2="105.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="602" y="109.0" text-anchor="end" font-size="11" fill="#64748b">100%</text>
+<rect x="634.0" y="369.0" width="32" height="66.0" fill="#f59e0b" rx="2"/>
+<text x="650.0" y="363.0" text-anchor="middle" font-size="10.5" font-weight="700" fill="#92400e">20.0%</text>
+<rect x="672.0" y="127.0" width="32" height="308.0" fill="#10b981" rx="2"/>
+<text x="688.0" y="121.0" text-anchor="middle" font-size="10.5" font-weight="700" fill="#065f46">93.3%</text>
+<text x="669.0" y="455" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1e293b">SVSR (%)</text>
+<rect x="764.0" y="193.0" width="32" height="242.0" fill="#f59e0b" rx="2"/>
+<text x="780.0" y="187.0" text-anchor="middle" font-size="10.5" font-weight="700" fill="#92400e">73.3%</text>
+<rect x="802.0" y="435.0" width="32" height="2.0" fill="#10b981" rx="2"/>
+<text x="818.0" y="429.0" text-anchor="middle" font-size="10.5" font-weight="700" fill="#065f46">0.0%</text>
+<text x="799.0" y="455" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1e293b">Unsafe Side-Effect (%)</text>
+<rect x="894.0" y="215.0" width="32" height="220.0" fill="#f59e0b" rx="2"/>
+<text x="910.0" y="209.0" text-anchor="middle" font-size="10.5" font-weight="700" fill="#92400e">66.7%</text>
+<rect x="932.0" y="435.0" width="32" height="2.0" fill="#10b981" rx="2"/>
+<text x="948.0" y="429.0" text-anchor="middle" font-size="10.5" font-weight="700" fill="#065f46">0.0%</text>
+<text x="929.0" y="455" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1e293b">Contract Escape (%)</text>
+<text x="520" y="505" text-anchor="middle" font-size="11.5" fill="#334155">Live llama3:latest Summary (30 Runs across 3 Domains): B2 Naive Retry SVSR=20.0% (Unsafe=73.33%) vs. FlowGuard SVSR=93.33% (Unsafe=0.0%, p50=16065.72 ms, p95=67130.867 ms).</text>
+</svg>

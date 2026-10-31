@@ -1,6 +1,8 @@
 # FlowGuard: Contract-Aware Runtime Verification, Bounded Recovery & Side-Effect Idempotency for Agentic n8n Workflows
 
-**Author:** Iyed Mohamed (`ORCID: 0009-0008-9493-7510`, ESPRIT School of Engineering)  
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23844458.svg)](https://doi.org/10.5281/zenodo.23844458)
+
+**Author:** Iyed Mohamed (`ORCID: 0009-0008-9493-7510`, ESPRIT School of Engineering) | **Zenodo Preprint DOI:** [`10.5281/zenodo.23844458`](https://doi.org/10.5281/zenodo.23844458)  
 **Technical Report (PDF, 8 Pages):** [`docs/FlowGuard_Technical_Report_Iyed_MOHAMED.pdf`](docs/FlowGuard_Technical_Report_Iyed_MOHAMED.pdf) | **Full Readable Paper (Markdown):** [`docs/FlowGuard_Technical_Report_Iyed_MOHAMED.md`](docs/FlowGuard_Technical_Report_Iyed_MOHAMED.md)
 
 ---
